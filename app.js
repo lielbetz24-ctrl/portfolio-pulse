@@ -382,6 +382,24 @@ async function loadUserData() {
         allTips = data.tips || [];
         allUsers = data.clients || [];
 
+        // Instantly populate client prices if returned in sync to prevent empty initial renders (no dashes!)
+        if (data.prices) {
+            Object.entries(data.prices).forEach(([symbol, stock]) => {
+                if (stock && stock.price != null) {
+                    const price = Number(stock.price);
+                    const change = Number(stock.change || 0);
+                    MOCK_STOCK_PRICES[symbol] = {
+                        name: stock.name || symbol,
+                        price,
+                        change,
+                        previousClose: stock.previousClose || (price / (1 + change / 100))
+                    };
+                }
+            });
+            // Update localStorage as well
+            localStorage.setItem('market_stock_prices', JSON.stringify(MOCK_STOCK_PRICES));
+        }
+
         if (currentUser.role === 'client') {
             refreshCalculations();
         } else {

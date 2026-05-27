@@ -362,12 +362,20 @@ async function handleApi(req, res, pathname, query) {
     const db = readDb();
     await generateDailyAITips(db);
     const tips = db.tips.map(t => ({ id: t.id, advisor_id: t.advisor_id, recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), ticker: t.ticker, content: t.content, date: t.date || t.created_at?.split('T')[0] }));
+    
+    // Compile current cached prices from PRICE_CACHE
+    const prices = {};
+    for (const ticker in PRICE_CACHE) {
+      prices[ticker] = PRICE_CACHE[ticker].data;
+    }
+
     if (user.role === 'admin') {
       return sendJson(res, 200, {
         portfolios: db.portfolios,
         transactions: db.transactions,
         tips,
-        clients: db.users.filter(u => u.role === 'client' && u.is_active).map(publicUser)
+        clients: db.users.filter(u => u.role === 'client' && u.is_active).map(publicUser),
+        prices
       });
     }
     let portfolios = db.portfolios.filter(p => p.user_id === user.id);
@@ -379,7 +387,7 @@ async function handleApi(req, res, pathname, query) {
     }
     const ids = portfolios.map(p => p.id);
     const transactions = db.transactions.filter(t => ids.includes(t.portfolio_id));
-    return sendJson(res, 200, { portfolios, transactions, tips, clients: [] });
+    return sendJson(res, 200, { portfolios, transactions, tips, clients: [], prices });
   }
 
   if (pathname === '/api/transactions' && req.method === 'POST') {
