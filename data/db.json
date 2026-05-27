@@ -1,0 +1,194 @@
+{
+  "users": [
+    {
+      "id": "u_admin_avi",
+      "name": "אבי",
+      "email": "aviariel91@gmail.com",
+      "password_hash": "e641e1071f4c771eaaf5f5915656d5d6:18a2643ca805432b997772529d2b90e20a04bc9ec47c7fe31101ac21c14e95d345f206b7d6975562c76aa605c7413c71f08828d4216e0dbc0ebd9b1aad95ee96",
+      "role": "admin",
+      "is_active": true,
+      "created_at": "2026-05-27T10:14:35.236Z"
+    },
+    {
+      "id": "u_1779877088663_3d22893d",
+      "name": "ליאל בן ציון",
+      "email": "liel.be.tz24@gmail.com",
+      "password_hash": "2f27210389d1e73eac50395f1a2122fc:24bfcd27c6b25f6c0a7fe97d212e20cef787a09f299bc821a76d8c23ea59bf42ac59bfaa80da726062c32fb6b91dce8b2db96e56e1e9ac45a342b53d44a929dd",
+      "role": "client",
+      "is_active": true,
+      "created_at": "2026-05-27T10:18:08.730Z"
+    }
+  ],
+  "portfolios": [
+    {
+      "id": "p_1779877088730_29788219",
+      "user_id": "u_1779877088663_3d22893d",
+      "name": "תיק השקעות אישי",
+      "cash_balance": 0,
+      "created_at": "2026-05-27T10:18:08.730Z"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "tx_1779884553222_8be60cc2",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "EQQS.L",
+      "action_type": "holding",
+      "quantity": 197.1742,
+      "price": 77.25,
+      "transaction_date": "2026-05-27T12:22:33.211Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884588397_b25e715b",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "GOOG",
+      "action_type": "holding",
+      "quantity": 16.9961,
+      "price": 307.28,
+      "transaction_date": "2026-05-27T12:23:08.390Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884621702_3b7a43c8",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "GLD",
+      "action_type": "holding",
+      "quantity": 14.0736,
+      "price": 463.77,
+      "transaction_date": "2026-05-27T12:23:41.699Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884667391_241c79b6",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "XLP",
+      "action_type": "holding",
+      "quantity": 50.9918,
+      "price": 85.65,
+      "transaction_date": "2026-05-27T12:24:27.380Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884707751_86866a72",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "ASTS",
+      "action_type": "holding",
+      "quantity": 24.9893,
+      "price": 87.04,
+      "transaction_date": "2026-05-27T12:25:07.739Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884735522_345de8f7",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "IONQ",
+      "action_type": "holding",
+      "quantity": 45.3514,
+      "price": 48.51,
+      "transaction_date": "2026-05-27T12:25:35.510Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884765639_68066235",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "IBIT",
+      "action_type": "holding",
+      "quantity": 54.6532,
+      "price": 39.94,
+      "transaction_date": "2026-05-27T12:26:05.618Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884797375_719ce11e",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "ONDS",
+      "action_type": "holding",
+      "quantity": 213.6449,
+      "price": 9.83,
+      "transaction_date": "2026-05-27T12:26:37.366Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884840085_a59036b0",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": "PLTR",
+      "action_type": "holding",
+      "quantity": 15.1629,
+      "price": 143.44,
+      "transaction_date": "2026-05-27T12:27:20.077Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    },
+    {
+      "id": "tx_1779884860276_3624ff75",
+      "portfolio_id": "p_1779877088730_29788219",
+      "ticker": null,
+      "action_type": "deposit",
+      "quantity": 0,
+      "price": 2007.55,
+      "transaction_date": "2026-05-27T12:27:40.264Z",
+      "created_by_user_id": "u_1779877088663_3d22893d"
+    }
+  ],
+  "tips": [
+    {
+      "id": "t1",
+      "advisor_id": "u_admin_avi",
+      "ticker": "NVDA",
+      "content": "מניית אנבידיה (NVDA) נסחרת במכפיל רווח גבוה. אם היא מעל 25% מהתיק — שקול מימוש רווחים חלקי.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t2",
+      "advisor_id": "u_admin_avi",
+      "ticker": "AAPL",
+      "content": "אפל (AAPL) מציגה יציבות פיננסית חזקה. מניית עוגן מתאימה לתקופות אי-ודאות.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t5",
+      "advisor_id": "u_admin_avi",
+      "ticker": null,
+      "content": "שמירה על 10%-15% מזומן בתיק מאפשרת לנצל ירידות שערים ללא מכירה בהפסד.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t6",
+      "advisor_id": "u_admin_avi",
+      "ticker": null,
+      "content": "ביזור: הימנע מחשיפה מעל 20% למניה בודדת, ופזר בין סקטורים שונים.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t_1779888282260_cf36cbc6",
+      "advisor_id": "u_admin_avi",
+      "ticker": null,
+      "content": "תקנו נבידיה!!!!!!!!!!1",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t_ai_macro_2026-05-27_q6tzp",
+      "advisor_id": "u_admin_avi",
+      "recommender": "ai",
+      "ticker": null,
+      "content": "📊 <strong>מצב השוק הגלובלי:</strong> מדד ה-S&P 500 נסחר כעת בשער של $7,521.34 (+0.03%). המגמה הנוכחית היא חיובית ותומכת. מומלץ לנצל את המומנטום להחזקת מניות ערך יציבות, אך להימנע מרדיפה אחר מניות בשיא כל הזמנים. מומלץ להתמקד בפיזור רחב בין סקטורים מבוססי רווחיות.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t_ai_stock_2026-05-27_0e08a",
+      "advisor_id": "u_admin_avi",
+      "recommender": "ai",
+      "ticker": "NVDA",
+      "content": "🚀 <strong>אנליזה למניית NVDA:</strong> מניית אנבידיה נסחרת בשער של $210.79 (-1.89%) ועוברת מימוש רווחים בריא. שער הכניסה הנוכחי מציע הזדמנות נוחה למי שמעוניין להגדיל חשיפה לטווח ארוך. החברה ממשיכה ליהנות מביקושים חסרי תקדים לשבבי Blackwell.",
+      "date": "2026-05-27"
+    },
+    {
+      "id": "t_ai_sector_2026-05-27_7gjid",
+      "advisor_id": "u_admin_avi",
+      "recommender": "ai",
+      "ticker": null,
+      "content": "⚠️ <strong>אזהרת סקטור - נדל\"ן מסחרי:</strong> הריביות הגבוהות בעולם ממשיכות להעיב על סקטור הנדל\"ן המסחרי והמשרדים. מומלץ להימנע מחשיפת יתר לחברות ממונפות מאוד בתחום זה ולנתב הון פנוי לחברות בעלות תזרים מזומנים חופשי חזק.",
+      "date": "2026-05-27"
+    }
+  ]
+}
