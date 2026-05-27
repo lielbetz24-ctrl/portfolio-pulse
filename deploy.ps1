@@ -102,9 +102,9 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "2. לחץ על 'New +' ובחר 'Web Service'." -ForegroundColor White
     Write-Host "3. תחת 'Connect a repository', בחר ברפוזיטורי 'portfolio-pulse' שיצרנו כרגע." -ForegroundColor White
     Write-Host "4. בהגדרות השרת, תן שם לשרת שלך, ודא שהגדרות ההפעלה הן:" -ForegroundColor White
-    Write-Host "   - Runtime: Node" -ForegroundColor LightCyan
-    Write-Host "   - Build Command: npm install (או להשאיר ריק)" -ForegroundColor LightCyan
-    Write-Host "   - Start Command: npm start" -ForegroundColor LightCyan
+    Write-Host "   - Runtime: Node" -ForegroundColor Cyan
+    Write-Host "   - Build Command: npm install (או להשאיר ריק)" -ForegroundColor Cyan
+    Write-Host "   - Start Command: npm start" -ForegroundColor Cyan
     Write-Host "5. לחץ על 'Deploy Web Service' והשרת שלך יהיה באוויר 24/7 באופן קבוע ומאובטח!" -ForegroundColor White
     Write-Host ""
     Write-Host "ברגע שזה יסתיים, Render יתנו לך כתובת קבועה. שלח לי אותה ואני אקמפל לך" -ForegroundColor Yellow

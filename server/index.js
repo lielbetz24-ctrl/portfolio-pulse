@@ -299,10 +299,15 @@ function serveStatic(req, res, filePath) {
     const ext = path.extname(filePath);
     const contentType = MIME[ext] || 'application/octet-stream';
     
+    const noCacheExts = ['.html', '.js', '.css', '.json', '.apk'];
+    const cacheControl = noCacheExts.includes(ext)
+      ? 'no-cache, no-store, must-revalidate'
+      : 'public, max-age=86400';
+
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': stats.size,
-      'Cache-Control': ext === '.apk' ? 'no-cache' : 'public, max-age=31536000'
+      'Cache-Control': cacheControl
     });
     
     const stream = fs.createReadStream(filePath);

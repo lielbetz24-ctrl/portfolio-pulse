@@ -161,14 +161,8 @@ async function fetchLivePrices() {
     const syncBadge = document.getElementById('market-sync-badge');
     const syncStatusText = document.getElementById('market-sync-status');
     const syncIcon = document.getElementById('sync-icon-spin');
-    
-    // קבלת כל סימולי המניות הייחודיים הקיימים בתיקי הלקוחות ובמאגר הסמנטי
+    // קבלת כל סימולי המניות הייחודיים הקיימים בתיקי הלקוחות
     const uniqueTickersSet = new Set();
-    
-    // הוספת כל מניות המאגר הסמנטי כברירת מחדל לסנכרון, כדי שכולן יציגו מחירים מדויקים בזמן אמת בחיפוש!
-    SEMANTIC_STOCK_DATABASE.forEach(stock => {
-        uniqueTickersSet.add(stock.ticker.toUpperCase());
-    });
     
     portfolios.forEach(p => {
         const metrics = calculatePortfolioMetrics(p.id);
