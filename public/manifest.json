@@ -1,0 +1,18 @@
+{
+  "name": "PortfolioPulse AI",
+  "short_name": "PortfolioPulse",
+  "description": "מעקב וניתוח תיקי השקעות ומסחר מונחה בינה מלאכותית",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1d",
+  "theme_color": "#0a0f1d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2910/2910312.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

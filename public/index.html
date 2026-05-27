@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PortfolioPulse - ניהול תיקי השקעות ומסחר</title>
+    <!-- Google Fonts - Outfit for Numbers & Roboto for clean RTL Hebrew -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Material Icons Rounded -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- PWA Setup & iOS Mobile Standalone Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PortfolioPulse">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2910/2910312.png">
+</head>
+<body>
+
+    <!-- רקע דינמי מונפש -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-glow bg-glow-3"></div>
+
+    <!-- ==================== 1. מסך התחברות והרשמה (Auth) ==================== -->
+    <div id="auth-screen" class="auth-container active">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <span class="material-icons-round logo-icon">insights</span>
+                <h1>PortfolioPulse <span class="accent-text">AI</span></h1>
+                <p class="auth-subtitle">מעקב וניתוח תיקי השקעות מונחה בינה מלאכותית</p>
+            </div>
+            
+            <div class="auth-tabs">
+                <button id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">התחברות</button>
+                <button id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">הרשמה מהירה</button>
+            </div>
+
+            <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+                <div class="form-group" id="name-group" style="display: none;">
+                    <label for="auth-name">שם מלא</label>
+                    <div class="input-wrapper">
+                        <span class="material-icons-round input-icon">person</span>
+                        <input type="text" id="auth-name" placeholder="ישראל ישראלי">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-email">כתובת אימייל</label>
+                    <div class="input-wrapper">
+                        <span class="material-icons-round input-icon">mail</span>
+                        <input type="email" id="auth-email" placeholder="name@example.com" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-password">סיסמה</label>
+                    <div class="input-wrapper">
+                        <span class="material-icons-round input-icon">lock</span>
+                        <input type="password" id="auth-password" placeholder="••••••••" required>
+                    </div>
+                </div>
+
+                <div class="form-group" id="role-group" style="display: none !important;"></div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="auth-submit-btn">
+                    <span>התחבר למערכת</span>
+                    <span class="material-icons-round">arrow_back</span>
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <p id="auth-switch-desc">עדיין אין לך חשבון? <a href="#" onclick="switchAuthTab('signup')">הרשם עכשיו</a></p>
+                <div class="mobile-apps-download" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary);">הורדת האפליקציה הרשמית לטלפון:</span>
+                    <div style="display: flex; gap: 12px; justify-content: center; width: 100%;">
+                        <a href="/PortfolioPulse.apk" class="btn btn-outline" style="font-size: 0.75rem; padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; background: rgba(0, 230, 118, 0.05); border-color: rgba(0, 230, 118, 0.2); color: var(--pos-green); text-decoration: none;">
+                            <span class="material-icons-round" style="font-size: 16px;">android</span>
+                            <span>אנדרואיד (APK)</span>
+                        </a>
+                        <a href="#" onclick="alert('במכשירי iOS (אייפון): \n1. פתח את הקישור בדפדפן Safari\n2. לחץ על כפתור השיתוף (Share)\n3. בחר ב-\'הוסף למסך הבית\' (Add to Home Screen)')" class="btn btn-outline" style="font-size: 0.75rem; padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; background: rgba(0, 242, 254, 0.05); border-color: rgba(0, 242, 254, 0.2); color: var(--accent-blue-start); text-decoration: none;">
+                            <span class="material-icons-round" style="font-size: 16px;">apple</span>
+                            <span>אייפון (iOS PWA)</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 2. מסך האפליקציה הראשי (App Layout) ==================== -->
+    <div id="app-screen" class="app-layout">
+        
+        <!-- סרגל צדי (Sidebar) -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <span class="material-icons-round logo-icon">insights</span>
+                <h2>PortfolioPulse <span class="accent-text">AI</span></h2>
+            </div>
+
+            <div class="user-profile-pill">
+                <div class="avatar">
+                    <span class="material-icons-round">account_circle</span>
+                </div>
+                <div class="user-info">
+                    <span id="user-display-name" class="user-name">טוען...</span>
+                    <span id="user-display-role" class="user-role">לקוח</span>
+                </div>
+            </div>
+
+            <!-- תפריט ניווט דינמי מבוסס תפקיד -->
+            <nav class="sidebar-nav" id="sidebar-navigation">
+                <!-- ימולא דינמית על ידי JS בהתאם ל-role (Client/Admin) -->
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-app-download" style="margin-bottom: 16px; padding: 10px 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px;">
+                    <span style="font-size: 0.7rem; color: var(--text-secondary); text-align: center;">הורד את האפליקציה למובייל:</span>
+                    <a href="/PortfolioPulse.apk" class="btn btn-outline" style="font-size: 0.72rem; padding: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 12px; border-color: rgba(0, 230, 118, 0.2); color: var(--pos-green); text-decoration: none; width: 100%;">
+                        <span class="material-icons-round" style="font-size: 14px;">android</span>
+                        <span>אנדרואיד (APK)</span>
+                    </a>
+                </div>
+                <button class="btn btn-danger btn-block" onclick="handleLogout()">
+                    <span class="material-icons-round">logout</span>
+                    <span>התנתק</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- אזור התוכן המרכזי -->
+        <main class="main-content">
+            
+            <!-- ראש הדף (Header) -->
+            <header class="app-header">
+                <div class="header-title">
+                    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                        <h1 id="view-title" style="margin-bottom: 0;">לוח בקרה</h1>
+                        <span class="viewing-badge" id="market-sync-badge" style="background: rgba(0, 230, 118, 0.08); border-color: rgba(0, 230, 118, 0.2); color: var(--pos-green); padding: 4px 12px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; border-radius: 20px;">
+                            <span class="material-icons-round" style="font-size: 14px; animation: spinIcon 3s infinite linear;" id="sync-icon-spin">sync</span>
+                            <span id="market-sync-status">סנכרון שוק: פעיל</span>
+                        </span>
+                        <!-- בורר מטבע תצוגה דינמי פרימיום -->
+                        <div class="currency-switch-wrapper" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 4px 12px; border-radius: 20px;">
+                            <span class="material-icons-round" style="font-size: 14px; color: var(--accent-blue-start);">currency_exchange</span>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary);">תצוגה:</span>
+                            <button class="currency-toggle-btn" id="currency-toggle" onclick="toggleDisplayCurrency()" style="background: none; border: none; color: var(--accent-blue-start); font-family: var(--font-numbers); font-weight: 700; cursor: pointer; font-size: 0.75rem; padding: 2px 6px;">USD ($)</button>
+                        </div>
+                    </div>
+                    <p id="view-subtitle" class="text-muted" style="margin-top: 4px;">סקירה כללית של התיק וביצועי השוק</p>
+                </div>
+                <div class="header-actions" id="header-action-area">
+                    <button class="btn btn-success" onclick="openTransactionModal()" id="btn-header-action">
+                        <span class="material-icons-round">history_edu</span>
+                        <span>תיעוד פעולה / עסקה למעקב</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- תוכן משתנה לפי הטאב הנבחר -->
+            <div class="content-body">
+
+                <!-- ==================== א. מסכי לקוח קצה (Client Views) ==================== -->
+
+                <!-- 1. לוח בקרה לקוח (Dashboard) -->
+                <div id="view-dashboard-pane" class="tab-pane">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">שווי תיק כולל</span>
+                                <span class="material-icons-round metric-icon blue">account_balance_wallet</span>
+                            </div>
+                            <div class="metric-value" id="val-total-portfolio">$0.00</div>
+                            <div class="metric-footer">
+                                <span class="text-muted">מזומן + שווי מניות</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">יתרת מזומן פנויה</span>
+                                <span class="material-icons-round metric-icon purple">payments</span>
+                            </div>
+                            <div class="metric-value" id="val-cash-balance">$0.00</div>
+                            <div class="metric-footer">
+                                <span class="text-muted">זמין לרכישת מניות</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">רווח / הפסד כולל (P&L)</span>
+                                <span class="material-icons-round metric-icon green" id="pnl-icon">trending_up</span>
+                            </div>
+                            <div class="metric-value pnl-positive" id="val-total-pnl">+$0.00</div>
+                            <div class="metric-footer">
+                                <span class="pnl-percent pnl-positive" id="val-total-pnl-pct">+0.00%</span>
+                                <span class="text-muted">מתחילת הפעילות</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-visuals">
+                        <div class="visual-card holdings-card">
+                            <div class="card-header">
+                                <h3>מניות מוחזקות בתיק</h3>
+                                <span class="badge badge-outline" id="holdings-count">0 נכסים</span>
+                            </div>
+                            <div class="table-container">
+                                <table class="holdings-table">
+                                    <thead>
+                                        <tr>
+                                            <th>מנייה</th>
+                                            <th>שער שוק</th>
+                                            <th>שינוי יומי</th>
+                                            <th>שווי בתיק</th>
+                                            <th style="width: 50px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="holdings-table-body">
+                                        <!-- יוזן דינמית -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="visual-card chart-card">
+                            <div class="card-header">
+                                <h3>התפלגות נכסים</h3>
+                            </div>
+                            <div class="chart-wrapper">
+                                <canvas id="assetsDoughnutChart"></canvas>
+                                <div id="chart-empty-state" class="empty-state">
+                                    <span class="material-icons-round">pie_chart</span>
+                                    <p>אין נתוני מניות להצגה. בצע עסקה ראשונה כדי לראות את התפלגות התיק.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. היסטוריית עסקאות לקוח (Transactions) -->
+                <div id="view-transactions-pane" class="tab-pane">
+                    <div class="visual-card full-width">
+                        <div class="card-header flex-between">
+                            <h3>רישום עסקאות ופעולות מזומן</h3>
+                            <div class="filters">
+                                <button class="filter-btn active" onclick="filterTransactions('all')">הכל</button>
+                                <button class="filter-btn" onclick="filterTransactions('buy')">קניות</button>
+                                <button class="filter-btn" onclick="filterTransactions('sell')">מכירות</button>
+                                <button class="filter-btn" onclick="filterTransactions('cash')">הפקדות/משיכות</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table class="holdings-table">
+                                <thead>
+                                    <tr>
+                                        <th>תאריך ושעה</th>
+                                        <th>סוג פעולה</th>
+                                        <th>נייר ערך (Ticker)</th>
+                                        <th>כמות מניות</th>
+                                        <th>שער / סכום</th>
+                                        <th>סך הכל עסקה</th>
+                                        <th>סטטוס פעולה</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="transactions-table-body">
+                                    <!-- יוזן דינמית -->
+                                </tbody>
+                            </table>
+                            <div id="transactions-empty-state" class="empty-state" style="display: none;">
+                                <span class="material-icons-round">receipt_long</span>
+                                <p>טרם בוצעו עסקאות או פעולות בחשבון זה.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. יועץ השקעות AI (AI Advisor) -->
+                <div id="view-ai-advisor-pane" class="tab-pane">
+                    <div class="ai-advisor-grid">
+                        <div class="visual-card ai-chat-card">
+                            <div class="ai-chat-header">
+                                <div class="ai-avatar">
+                                    <span class="material-icons-round">psychology</span>
+                                </div>
+                                <div class="ai-status">
+                                    <h4>PortfolioPulse AI Advisor</h4>
+                                    <span class="status-indicator online">מחובר ומנתח את התיק שלך</span>
+                                </div>
+                            </div>
+                            <div class="chat-messages" id="chat-messages-container"></div>
+                            <div class="suggested-prompts-row" id="suggested-prompts"></div>
+                            <form class="chat-input-area" onsubmit="handleSendMessage(event)">
+                                <input type="text" id="chat-input-text" placeholder="שאל את ה-AI על התיק שלך, ביזור נכסים או מניות ספציפיות..." autocomplete="off">
+                                <button type="submit" class="btn-send">
+                                    <span class="material-icons-round">send</span>
+                                </button>
+                            </form>
+                        </div>
+
+                        <div class="ai-insights-panel">
+                            <div class="visual-card health-score-card">
+                                <h3>ציון בריאות תיק AI</h3>
+                                <div class="score-circle-container">
+                                    <div class="score-circle" id="health-score-value">85</div>
+                                    <svg class="score-svg" viewBox="0 0 100 100">
+                                        <circle class="score-bg-ring" cx="50" cy="50" r="45"></circle>
+                                        <circle class="score-fill-ring" id="score-ring" cx="50" cy="50" r="45" stroke-dasharray="283" stroke-dashoffset="42"></circle>
+                                    </svg>
+                                </div>
+                                <div class="score-desc" id="health-score-desc">טוען ניתוח...</div>
+                            </div>
+
+                            <div class="visual-card tips-card">
+                                <h3>המלצות השקעה מותאמות אישית</h3>
+                                <div class="tips-container" id="ai-tips-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- ==================== ב. מסכי יועץ/מנהל (Advisor/Admin Views) ==================== -->
+
+                <!-- 1. לוח בקרה ראשי ליועץ (Advisor Dashboard) -->
+                <div id="view-admin-dashboard-pane" class="tab-pane">
+                    <!-- שורת מדדים של היועץ -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">סך הון מנוהל (AUM)</span>
+                                <span class="material-icons-round metric-icon blue">monetization_on</span>
+                            </div>
+                            <div class="metric-value" id="admin-val-aum">$0.00</div>
+                            <div class="metric-footer">
+                                <span class="text-muted">סך הכל שווי תיקי כלל הלקוחות</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">לקוחות פעילים</span>
+                                <span class="material-icons-round metric-icon purple">group</span>
+                            </div>
+                            <div class="metric-value" id="admin-val-clients">0</div>
+                            <div class="metric-footer">
+                                <span class="text-muted">רשומים במערכת PortfolioPulse</span>
+                            </div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">טיפים והמלצות פעילים</span>
+                                <span class="material-icons-round metric-icon green">campaign</span>
+                            </div>
+                            <div class="metric-value" id="admin-val-tips">0</div>
+                            <div class="metric-footer">
+                                <span class="text-muted">המלצות שוק וניירות ערך</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- רשימת הלקוחות -->
+                    <div class="visual-card full-width">
+                        <div class="card-header">
+                            <h3>רשימת לקוחות השקעות</h3>
+                            <span class="badge badge-outline" id="admin-clients-count">0 לקוחות</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="holdings-table">
+                                <thead>
+                                    <tr>
+                                        <th>לקוח</th>
+                                        <th>אימייל</th>
+                                        <th>יתרת מזומן</th>
+                                        <th>מספר מניות בתיק</th>
+                                        <th>שווי תיק כולל</th>
+                                        <th>פעולות מנהל</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-clients-table-body">
+                                    <!-- יוזן דינמית -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- 2. מסך צפייה בתיק לקוח (Client Portfolio Viewer) -->
+                <div id="view-client-detail-pane" class="tab-pane">
+                    <div class="client-viewer-header">
+                        <button class="btn btn-outline" onclick="switchView('admin-dashboard')">
+                            <span class="material-icons-round">arrow_forward</span>
+                            <span>חזרה לרשימת לקוחות</span>
+                        </button>
+                        <div class="viewing-badge">
+                            <span class="material-icons-round">visibility</span>
+                            <span>מצב צפייה בתיק לקוח: <strong id="detail-client-name">—</strong></span>
+                        </div>
+                    </div>
+
+                    <!-- מדדי הלקוח הספציפי -->
+                    <div class="metrics-grid" style="margin-top: 20px;">
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">שווי תיק לקוח</span>
+                                <span class="material-icons-round metric-icon blue">account_balance_wallet</span>
+                            </div>
+                            <div class="metric-value" id="detail-total-portfolio">$0.00</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">יתרת מזומן לקוח</span>
+                                <span class="material-icons-round metric-icon purple">payments</span>
+                            </div>
+                            <div class="metric-value" id="detail-cash-balance">$0.00</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">רווח / הפסד (P&L)</span>
+                                <span class="material-icons-round metric-icon green" id="detail-pnl-icon">trending_up</span>
+                            </div>
+                            <div class="metric-value" id="detail-total-pnl">$0.00</div>
+                        </div>
+                    </div>
+
+                    <!-- אחזקות הלקוח הספציפי -->
+                    <div class="dashboard-visuals" style="margin-top: 24px;">
+                        <div class="visual-card holdings-card">
+                            <div class="card-header">
+                                <h3>מניות מוחזקות בתיק הלקוח</h3>
+                            </div>
+                            <div class="table-container">
+                                <table class="holdings-table">
+                                    <thead>
+                                        <tr>
+                                            <th>מנייה</th>
+                                            <th>שער שוק</th>
+                                            <th>שינוי יומי</th>
+                                            <th>שווי בתיק</th>
+                                            <th style="width: 50px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="detail-holdings-table-body">
+                                        <!-- יוזן דינמית -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="visual-card chart-card">
+                            <div class="card-header">
+                                <h3>התפלגות נכסי לקוח</h3>
+                            </div>
+                            <div class="chart-wrapper">
+                                <canvas id="detailAssetsDoughnutChart"></canvas>
+                                <div id="detail-chart-empty-state" class="empty-state">
+                                    <span class="material-icons-round">pie_chart</span>
+                                    <p>אין נתוני מניות בתיק לקוח זה.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- היסטוריית עסקאות הלקוח הספציפי -->
+                    <div class="visual-card full-width" style="margin-top: 24px;">
+                        <div class="card-header">
+                            <h3>היסטוריית פעולות לקוח</h3>
+                        </div>
+                        <div class="table-container">
+                            <table class="holdings-table">
+                                <thead>
+                                    <tr>
+                                        <th>תאריך ושעה</th>
+                                        <th>סוג פעולה</th>
+                                        <th>נייר ערך (Ticker)</th>
+                                        <th>כמות</th>
+                                        <th>מחיר / סכום</th>
+                                        <th>סך הכל עסקה</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detail-transactions-table-body">
+                                    <!-- יוזן דינמית -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. מערכת ניהול טיפים והמלצות (Tips Management) -->
+                <div id="view-admin-tips-pane" class="tab-pane">
+                    <div class="admin-tips-grid">
+                        
+                        <!-- טופס יצירת טיפ חדש -->
+                        <div class="visual-card">
+                            <div class="card-header">
+                                <h3>פרסום טיפ או המלצת השקעה חדשה</h3>
+                            </div>
+                            <form id="create-tip-form" onsubmit="handleCreateTipSubmit(event)">
+                                <div class="form-group">
+                                    <label>סוג ההמלצה</label>
+                                    <div class="radio-toggle-group" style="grid-template-columns: 1fr 1fr;">
+                                        <input type="radio" id="tip-type-general" name="tip_type" value="general" checked onchange="toggleTipFormFields()">
+                                        <label for="tip-type-general">
+                                            <span class="material-icons-round">public</span>טיפ כללי (לכולם)
+                                        </label>
+
+                                        <input type="radio" id="tip-type-stock" name="tip_type" value="stock" onchange="toggleTipFormFields()">
+                                        <label for="tip-type-stock">
+                                            <span class="material-icons-round">star</span>טיפ ספציפי למניה
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="form-group" style="margin-top: 15px; display: none !important;">
+                                    <label>הגורם הממליץ (מחבר)</label>
+                                    <div class="radio-toggle-group" style="grid-template-columns: 1fr 1fr;">
+                                        <input type="radio" id="tip-author-avi" name="tip_author" value="avi" checked>
+                                        <label for="tip-author-avi">
+                                            <span class="material-icons-round">person</span>אבי
+                                        </label>
+
+                                        <input type="radio" id="tip-author-ai" name="tip_author" value="ai">
+                                        <label for="tip-author-ai">
+                                            <span class="material-icons-round">psychology</span>בוט AI
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="form-group" id="tip-ticker-group" style="display: none; position: relative;">
+                                    <label for="tip-ticker">סימול מניה (Ticker) או שם חברה</label>
+                                    <div class="input-wrapper">
+                                        <span class="material-icons-round input-icon">search</span>
+                                        <input type="text" id="tip-ticker" placeholder="חפש לפי שם חברה, ענף או סימול (למשל: אפל, שבבים, TSLA)..." autocomplete="off">
+                                    </div>
+                                    <div id="tip-ticker-suggestions" class="suggestions-dropdown" style="display: none;"></div>
+                                    <span class="field-hint">הקלד בעברית או באנגלית. מנגנון חיפוש סמנטי חכם יציע לך מניות תואמות ומחירים חיים.</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="tip-content">תוכן ההמלצה</label>
+                                    <div class="input-wrapper" style="align-items: flex-start;">
+                                        <span class="material-icons-round input-icon" style="top: 14px;">description</span>
+                                        <textarea id="tip-content" rows="6" placeholder="כתוב כאן את ניתוח ה-AI או המלצת ההשקעה שלך..." required style="width:100%; padding: 12px 42px 12px 16px; background: rgba(15, 20, 30, 0.8); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.95rem; resize: vertical; min-height: 120px;"></textarea>
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 10px;">
+                                    <span class="material-icons-round">publish</span>
+                                    <span>פרסם המלצה למערכת</span>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- רשימת הטיפים הקיימים והסרתם -->
+                        <div class="visual-card">
+                            <div class="card-header">
+                                <h3>המלצות פעילות במערכת</h3>
+                                <span class="badge badge-outline" id="admin-tips-count">0 פעילים</span>
+                            </div>
+                            <div class="admin-tips-list-container" id="admin-tips-list">
+                                <!-- יוזן דינמית -->
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ==================== 3. מודל תיעוד עסקה / פעולת מזומן למעקב (Transaction Modal) ==================== -->
+    <div id="transaction-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>תיעוד פעולה / עסקה למעקב</h3>
+                <button class="modal-close-btn" onclick="closeTransactionModal()">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            
+            <form id="transaction-form" onsubmit="handleTransactionSubmit(event)">
+                
+                <div class="form-group">
+                    <label>סוג הפעולה למעקב</label>
+                    <div class="radio-toggle-group">
+                        <input type="radio" id="act-holding" name="action_type" value="holding" checked onchange="toggleModalFields()">
+                        <label for="act-holding">
+                            <span class="material-icons-round">inventory_2</span>הוספת אחזקה לתיק
+                        </label>
+
+                        <input type="radio" id="act-buy" name="action_type" value="buy" onchange="toggleModalFields()">
+                        <label for="act-buy">
+                            <span class="material-icons-round">add_shopping_cart</span>תיעוד קנייה
+                        </label>
+
+                        <input type="radio" id="act-sell" name="action_type" value="sell" onchange="toggleModalFields()">
+                        <label for="act-sell">
+                            <span class="material-icons-round">sell</span>תיעוד מכירה
+                        </label>
+
+                        <input type="radio" id="act-deposit" name="action_type" value="deposit" onchange="toggleModalFields()">
+                        <label for="act-deposit">
+                            <span class="material-icons-round">add_card</span>הפקדת מזומן (אופציונלי)
+                        </label>
+
+                        <input type="radio" id="act-withdraw" name="action_type" value="withdraw" onchange="toggleModalFields()">
+                        <label for="act-withdraw">
+                            <span class="material-icons-round">outbox</span>משיכת מזומן
+                        </label>
+                    </div>
+                </div>
+
+                <!-- שדה סימול מניה למעקב (תומך בחיפוש סמנטי פרימיום) -->
+                <div class="form-group" id="modal-ticker-group" style="position: relative;">
+                    <label for="tx-ticker">סימול מניה (Ticker) או שם חברה</label>
+                    <div class="input-wrapper">
+                        <span class="material-icons-round input-icon">search</span>
+                        <input type="text" id="tx-ticker" placeholder="חפש לפי שם חברה, ענף או סימול (למשל: אפל, שבבים, TSLA)..." autocomplete="off">
+                    </div>
+                    <div id="ticker-suggestions" class="suggestions-dropdown" style="display: none;"></div>
+                    <span class="field-hint">הקלד בעברית או באנגלית. מנגנון חיפוש סמנטי חכם יציע לך מניות תואמות ומחירים חיים.</span>
+                </div>
+
+                <div class="form-row">
+                    <!-- שדה כמות (מופיע רק בקנייה/מכירה) -->
+                    <div class="form-group" id="modal-qty-group">
+                        <label for="tx-qty">כמות מניות</label>
+                        <div class="input-wrapper">
+                            <span class="material-icons-round input-icon">toll</span>
+                            <input type="number" id="tx-qty" step="0.0001" min="0.0001" placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <!-- שדה מחיר קנייה ממוצע (ידני) + שער שוק חי לעיון -->
+                    <div class="form-group">
+                        <label id="tx-price-label" for="tx-price">מחיר קנייה ממוצע ($)</label>
+                        <div class="input-wrapper">
+                            <span class="material-icons-round input-icon">attach_money</span>
+                            <input type="number" id="tx-price" step="0.01" min="0.01" placeholder="הזן את מחיר הקנייה הממוצע שלך" required>
+                        </div>
+                        <span class="field-hint" id="tx-market-price-hint">שער שוק נוכחי: — (מתעדכן אוטומטית מהבורסה)</span>
+                    </div>
+                </div>
+
+                <!-- סיכום עסקה משוער -->
+                <div class="transaction-summary-card" id="tx-summary-card">
+                    <div class="summary-row">
+                        <span>סך הכל שווי פעולה:</span>
+                        <span id="tx-summary-total" class="summary-total">$0.00</span>
+                    </div>
+                    <div class="summary-row" id="tx-summary-fee-row" style="display: none;">
+                        <span>יתרת מזומן בתיק (אופציונלי):</span>
+                        <span id="tx-summary-cash" class="text-muted">$0.00</span>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeTransactionModal()">ביטול</button>
+                    <button type="submit" class="btn btn-success" id="tx-submit-btn">רישום בתיק המעקב</button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <!-- הודעות התראה קופצות (Toasts) -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="calculations.js?v=2.0.3"></script>
+    <script src="api.js?v=2.0.3"></script>
+    <script src="app.js?v=2.0.3"></script>
+</body>
+</html>
