@@ -328,41 +328,74 @@ function showAuthScreen() {
     document.getElementById('auth-screen').classList.add('active');
 }
 
-// בניית תפריט הצד בהתאם לתפקיד המשתמש
+// בניית תפריט הצד ותפריט המובייל התחתון בהתאם לתפקיד המשתמש
 function renderSidebarNavigation() {
     const navContainer = document.getElementById('sidebar-navigation');
-    navContainer.innerHTML = '';
+    const mobileNavContainer = document.getElementById('mobile-navigation');
 
-    if (currentUser.role === 'admin') {
-        // תפריט של יועץ/מנהל (Admin)
-        navContainer.innerHTML = `
-            <button class="nav-item active" onclick="switchView('admin-dashboard')" id="nav-admin-dashboard">
-                <span class="material-icons-round">manage_accounts</span>
-                <span>לוח בקרה יועץ</span>
-            </button>
-            <button class="nav-item" onclick="switchView('admin-tips')" id="nav-admin-tips">
-                <span class="material-icons-round">campaign</span>
-                <span>ניהול המלצות וטיפים</span>
-                <span class="badge">ערוך</span>
-            </button>
-        `;
-    } else {
-        // תפריט של לקוח (Client)
-        navContainer.innerHTML = `
-            <button class="nav-item active" onclick="switchView('dashboard')" id="nav-dashboard">
-                <span class="material-icons-round">space_dashboard</span>
-                <span>לוח בקרה (Dashboard)</span>
-            </button>
-            <button class="nav-item" onclick="switchView('transactions')" id="nav-transactions">
-                <span class="material-icons-round">history</span>
-                <span>היסטוריית עסקאות</span>
-            </button>
-            <button class="nav-item nav-accent" onclick="switchView('ai-advisor')" id="nav-ai-advisor">
-                <span class="material-icons-round sparkle-icon">psychology</span>
-                <span>יועץ השקעות AI</span>
-                <span class="badge">Live</span>
-            </button>
-        `;
+    if (navContainer) {
+        navContainer.innerHTML = '';
+        if (currentUser.role === 'admin') {
+            navContainer.innerHTML = `
+                <button class="nav-item active" onclick="switchView('admin-dashboard')" id="nav-admin-dashboard">
+                    <span class="material-icons-round">manage_accounts</span>
+                    <span>לוח בקרה יועץ</span>
+                </button>
+                <button class="nav-item" onclick="switchView('admin-tips')" id="nav-admin-tips">
+                    <span class="material-icons-round">campaign</span>
+                    <span>ניהול המלצות וטיפים</span>
+                    <span class="badge">ערוך</span>
+                </button>
+            `;
+        } else {
+            navContainer.innerHTML = `
+                <button class="nav-item active" onclick="switchView('dashboard')" id="nav-dashboard">
+                    <span class="material-icons-round">space_dashboard</span>
+                    <span>לוח בקרה (Dashboard)</span>
+                </button>
+                <button class="nav-item" onclick="switchView('transactions')" id="nav-transactions">
+                    <span class="material-icons-round">history</span>
+                    <span>היסטוריית עסקאות</span>
+                </button>
+                <button class="nav-item nav-accent" onclick="switchView('ai-advisor')" id="nav-ai-advisor">
+                    <span class="material-icons-round sparkle-icon">psychology</span>
+                    <span>יועץ השקעות AI</span>
+                    <span class="badge">Live</span>
+                </button>
+            `;
+        }
+    }
+
+    if (mobileNavContainer) {
+        mobileNavContainer.innerHTML = '';
+        if (currentUser.role === 'admin') {
+            mobileNavContainer.innerHTML = `
+                <button class="mobile-nav-item active" onclick="switchView('admin-dashboard')" id="mobile-nav-admin-dashboard">
+                    <span class="material-icons-round">manage_accounts</span>
+                    <span>לוח יועץ</span>
+                </button>
+                <button class="mobile-nav-item" onclick="switchView('admin-tips')" id="mobile-nav-admin-tips">
+                    <span class="material-icons-round">campaign</span>
+                    <span>ניהול טיפים</span>
+                </button>
+            `;
+        } else {
+            mobileNavContainer.innerHTML = `
+                <button class="mobile-nav-item active" onclick="switchView('dashboard')" id="mobile-nav-dashboard">
+                    <span class="material-icons-round">space_dashboard</span>
+                    <span>לוח בקרה</span>
+                </button>
+                <button class="mobile-nav-item" onclick="switchView('transactions')" id="mobile-nav-transactions">
+                    <span class="material-icons-round">history</span>
+                    <span>עסקאות</span>
+                </button>
+                <button class="mobile-nav-item mobile-nav-accent" onclick="switchView('ai-advisor')" id="mobile-nav-ai-advisor">
+                    <span class="material-icons-round sparkle-icon">psychology</span>
+                    <span>יועץ AI</span>
+                    <span class="mobile-badge-live">Live</span>
+                </button>
+            `;
+        }
     }
 }
 
@@ -476,10 +509,15 @@ function handleLogout() {
 function switchView(view) {
     activeView = view;
     
-    // עדכון הטאב הפעיל בניווט הצדי
+    // עדכון הטאב הפעיל בניווט הצדי (דסקטופ)
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     const navItem = document.getElementById(`nav-${view}`);
     if (navItem) navItem.classList.add('active');
+
+    // עדכון הטאב הפעיל בניווט התחתון (מובייל)
+    document.querySelectorAll('.mobile-nav-item').forEach(item => item.classList.remove('active'));
+    const mobileNavItem = document.getElementById(`mobile-nav-${view}`);
+    if (mobileNavItem) mobileNavItem.classList.add('active');
 
     // הצגת הפאנל המתאים
     document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));

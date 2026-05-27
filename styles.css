@@ -1,6 +1,4 @@
-/* ==========================================================================
-   AeroWealth AI - Modern Premium CSS Design System (RTL & Glassmorphism)
-   ========================================================================== */
+
 
 :root {
     --bg-dark: #080a0f;
@@ -1485,7 +1483,105 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     }
     
     .sidebar {
-        display: none; /* במציאות כאן יכנס תפריט המבורגר צף */
+        display: none !important;
+    }
+    
+    .mobile-nav-bar {
+        display: flex !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: calc(64px + env(safe-area-inset-bottom));
+        background: rgba(10, 14, 22, 0.88);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-top: 1px solid var(--card-border);
+        justify-content: space-around;
+        align-items: center;
+        padding-bottom: env(safe-area-inset-bottom);
+        z-index: 1000;
+        box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+    }
+    
+    .mobile-nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: var(--transition-fast);
+        flex: 1;
+        height: 100%;
+        padding: 6px 0;
+    }
+    
+    .mobile-nav-item span.material-icons-round {
+        font-size: 22px;
+        transition: transform 0.2s ease;
+    }
+    
+    .mobile-nav-item span:not(.material-icons-round) {
+        font-size: 0.72rem;
+        font-weight: 500;
+    }
+    
+    .mobile-nav-item:hover, .mobile-nav-item:focus {
+        color: var(--text-primary);
+    }
+    
+    .mobile-nav-item.active {
+        color: var(--accent-blue-start);
+        font-weight: 600;
+    }
+    
+    .mobile-nav-item.active span.material-icons-round {
+        transform: scale(1.1);
+        background: linear-gradient(135deg, var(--accent-blue-start), var(--accent-blue-end));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    .mobile-nav-item.mobile-nav-accent {
+        position: relative;
+    }
+    
+    .mobile-nav-item.mobile-nav-accent.active {
+        color: #df8fff;
+    }
+    
+    .mobile-nav-item.mobile-nav-accent.active span.material-icons-round {
+        background: linear-gradient(135deg, var(--accent-purple-start), var(--accent-purple-end));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    .mobile-badge-live {
+        position: absolute;
+        top: 4px;
+        right: 50%;
+        transform: translateX(18px);
+        background: linear-gradient(135deg, var(--accent-purple-start), var(--accent-purple-end));
+        color: white;
+        font-size: 0.55rem;
+        font-weight: 700;
+        padding: 1px 4px;
+        border-radius: 10px;
+        animation: mobilePulseGlow 1.5s infinite alternate;
+    }
+    
+    @keyframes mobilePulseGlow {
+        0% { transform: translateX(18px) scale(0.95); opacity: 0.85; }
+        100% { transform: translateX(18px) scale(1.05); opacity: 1; }
+    }
+    
+    .main-content {
+        padding-bottom: calc(75px + env(safe-area-inset-bottom)) !important;
+        height: calc(100vh - (64px + env(safe-area-inset-bottom))) !important;
     }
     
     .dashboard-visuals {
@@ -1621,6 +1717,38 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
 }
 .holdings-table tbody tr.row-neg-red:hover {
     background: rgba(255, 23, 68, 0.05) !important;
+}
+
+.position-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: var(--font-numbers);
+}
+.position-status-badge.position-profit {
+    background: rgba(0, 230, 118, 0.12);
+    color: var(--pos-green);
+    border: 1px solid rgba(0, 230, 118, 0.25);
+}
+.position-status-badge.position-loss {
+    background: rgba(255, 23, 68, 0.1);
+    color: var(--neg-red);
+    border: 1px solid rgba(255, 23, 68, 0.22);
+}
+.position-status-badge.position-neutral {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+
+/* ==================== 10.5 Mobile Navigation Bar (Bottom Tab Bar) ==================== */
+.mobile-nav-bar {
+    display: none !important; /* Hidden on desktop */
 }
 
 /* ==================== 11. Mobile Screen Specific Overrides (Responsive Grid, Paddings & Typography) ==================== */
