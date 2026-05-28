@@ -1488,14 +1488,16 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     
     .mobile-menu-trigger {
         display: flex !important;
-        background: none;
-        border: none;
-        color: var(--text-primary);
+        background-color: red !important; /* RED debug background */
+        border: 2px solid white !important; /* White border */
+        color: white !important;
         cursor: pointer;
         position: absolute;
         right: 18px;
         top: 24px; /* Perfectly aligned on top right */
-        z-index: 1001;
+        z-index: 99999 !important; /* Extreme z-index */
+        padding: 6px !important;
+        border-radius: var(--radius-sm) !important;
     }
     
     .mobile-menu-trigger span.material-icons-round {
