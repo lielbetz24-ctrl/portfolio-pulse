@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <!-- Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="styles.css?v=2.0.7">
+    <link rel="stylesheet" href="styles.css?v=2.0.8">
     
     <!-- PWA Setup & iOS Mobile Standalone Support -->
     <link rel="manifest" href="manifest.json">
@@ -140,9 +140,10 @@
             
             <!-- ראש הדף (Header) -->
             <header class="app-header">
-                <!-- כפתור המבורגר למובייל -->
                 <button id="mobile-menu-btn" class="mobile-menu-trigger" onclick="toggleMobileDrawer()">
-                    <span class="material-icons-round">menu</span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
                 </button>
                 <div class="header-title">
                     <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
@@ -715,8 +716,8 @@
     <!-- הודעות התראה קופצות (Toasts) -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="calculations.js?v=2.0.7"></script>
-    <script src="api.js?v=2.0.7"></script>
-    <script src="app.js?v=2.0.7"></script>
+    <script src="calculations.js?v=2.0.8"></script>
+    <script src="api.js?v=2.0.8"></script>
+    <script src="app.js?v=2.0.8"></script>
 </body>
 </html>

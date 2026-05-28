@@ -1488,32 +1488,41 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     
     .mobile-menu-trigger {
         display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
+        gap: 5px !important;
         background-color: red !important; /* RED debug background */
-        border: 2px solid white !important; /* White border */
+        border: 2px solid green !important; /* GREEN debug border */
         color: white !important;
-        cursor: pointer;
-        position: absolute;
-        right: 18px;
-        top: 24px; /* Perfectly aligned on top right */
+        cursor: pointer !important;
+        position: absolute !important;
+        right: 18px !important;
+        top: 24px !important; /* Perfectly aligned on top right */
         z-index: 99999 !important; /* Extreme z-index */
-        padding: 6px !important;
+        min-width: 45px !important;
+        min-height: 45px !important;
+        max-width: 45px !important;
+        max-height: 45px !important;
         border-radius: var(--radius-sm) !important;
+        padding: 0 !important;
     }
     
-    .mobile-menu-trigger span.material-icons-round {
-        font-size: 32px; /* Large, premium touch target */
-        background: linear-gradient(135deg, var(--accent-blue-start), var(--accent-blue-end));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        filter: drop-shadow(0 0 4px rgba(0, 242, 254, 0.3));
-        transition: transform 0.2s ease;
+    .mobile-menu-trigger .hamburger-line {
+        display: block !important;
+        width: 24px !important;
+        height: 3px !important;
+        background-color: white !important;
+        border-radius: 2px !important;
+        transition: all 0.3s ease !important;
     }
     
-    .mobile-menu-trigger:active span.material-icons-round {
-        transform: scale(0.9);
+    .mobile-menu-trigger:active .hamburger-line {
+        transform: scale(0.9) !important;
     }
     
     .app-header {
+        position: relative !important; /* ESTABLISH AN ABSOLUTE COORDINATE BASE SYSTEM */
         padding: 48px 16px 16px 16px !important; /* Lower the title slightly from the top to fit mobile notch */
         flex-direction: column !important;
         align-items: center !important;
@@ -1741,8 +1750,10 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
 
 
 /* ==================== 10.5 Mobile Hamburger Menu & sliding Drawer ==================== */
-.mobile-menu-trigger {
-    display: none !important; /* Hidden on desktop */
+@media (min-width: 1025px) {
+    .mobile-menu-trigger {
+        display: none !important; /* Hidden on desktop */
+    }
 }
 .mobile-drawer-overlay {
     position: fixed;
@@ -1888,6 +1899,7 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     }
 
     .app-header {
+        position: relative !important; /* ESTABLISH AN ABSOLUTE COORDINATE BASE SYSTEM */
         padding: 48px 14px 16px 14px !important; /* Lower the title slightly from the top to fit mobile notch */
         flex-direction: column !important;
         align-items: center !important;
