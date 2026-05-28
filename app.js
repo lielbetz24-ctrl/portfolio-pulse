@@ -2,6 +2,34 @@
    PortfolioPulse AI - Modern Application Logic, Financial Calculations & AI
    ========================================================================== */
 
+let messaging = null;
+
+async function initFirebase() {
+    try {
+        const config = await API.request('GET', '/api/notifications/firebase-config');
+        if (!config || !config.apiKey || config.apiKey === 'mock-api-key') {
+            console.warn('[Firebase] Firebase configuration not defined in environment variables yet.');
+            return;
+        }
+
+        // Initialize Firebase Compat SDK
+        firebase.initializeApp(config);
+        messaging = firebase.messaging();
+        console.log('[Firebase] Successfully initialized Firebase Cloud Messaging!');
+
+        // Foreground messages listener
+        messaging.onMessage((payload) => {
+            console.log('[Firebase] Received foreground message:', payload);
+            if (payload && payload.notification) {
+                showToast(`${payload.notification.title}: ${payload.notification.body}`, 'success');
+            }
+        });
+    } catch (e) {
+        console.warn('[Firebase] Failed to initialize Firebase:', e);
+    }
+}
+
+
 // ==================== הגדרות API ומפתחות גישה בזמן אמת ====================
 const API_CONFIG = {
     // מפתח ה-API האישי שלך (למשל עבור Alpha Vantage או שירות מנויים של Yahoo)
@@ -216,6 +244,15 @@ document.addEventListener("DOMContentLoaded", () => {
                     reg.update();
                 })
                 .catch(err => console.error('Service Worker registration failed:', err));
+
+            // Register Firebase Messaging Service Worker and initialize Firebase SDK
+            navigator.serviceWorker.register('/firebase-messaging-sw.js')
+                .then(reg => {
+                    console.log('Firebase Service Worker registered successfully:', reg.scope);
+                    reg.update();
+                    initFirebase();
+                })
+                .catch(err => console.error('Firebase Service Worker registration failed:', err));
         });
     }
 
@@ -2836,62 +2873,48 @@ function togglePushSubscription(event) {
 
     if (isEnabled) {
         // Error handling for lack of push support (iOS PWA verification)
-        if (!('Notification' in window) || !('PushManager' in window)) {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) {
             showToast('התראות אינן נתמכות בדפדפן זה – אנא הוסף את האפליקציה למסך הבית דרך תפריט השיתוף של iOS', 'error');
             if (sidebarToggle) sidebarToggle.checked = false;
             if (mobileToggle) mobileToggle.checked = false;
             return;
         }
 
-        Notification.requestPermission().then(permission => {
+        Notification.requestPermission().then(async permission => {
             if (permission === 'granted') {
-                showToast('התראות דחיפה הופעלו בהצלחה בדפדפן!', 'success');
+                showToast('התראות דחיפה הופעלו בהצלחה בדפנפן!', 'success');
                 localStorage.setItem('push_notifications_enabled', 'true');
                 
-                // Register Service Worker and connect to Push Manager ONLY after granted status!
+                // Register Service Worker and connect to Firebase ONLY after granted status!
                 if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.register('/sw.js')
-                        .then(async reg => {
-                            console.log('Service Worker registered successfully after permission granted:', reg.scope);
-                            reg.update();
-                            
-                            try {
-                                // Fetch dynamic VAPID Public Key from Backend
-                                const vapidData = await API.request('GET', '/api/notifications/vapid-public-key');
-                                if (!vapidData || !vapidData.publicKey) {
-                                    throw new Error('Failed to retrieve VAPID public key');
-                                }
+                    try {
+                        const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                        console.log('Firebase Service Worker registered successfully after permission granted:', reg.scope);
+                        reg.update();
 
-                                const subscribeOptions = {
-                                    userVisibleOnly: true,
-                                    applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey)
-                                };
-                                
-                                const subscription = await reg.pushManager.subscribe(subscribeOptions);
-                                console.log('[Push Manager] Subscribed successfully:', subscription);
-                                
-                                // Correctly serialize using toJSON() to extract cryptographic keys
-                                const subJSON = subscription.toJSON();
-                                
-                                // Sync subscription on backend
-                                await API.request('POST', '/api/notifications/subscribe', {
-                                    endpoint: subJSON.endpoint,
-                                    keys: subJSON.keys || { p256dh: '', auth: '' }
-                                });
-                            } catch (err) {
-                                console.warn('[Push Manager] Subscription failed or mock sync fallback:', err);
-                                // Fallback/Mock subscription sync
-                                const endpoint = 'mock-endpoint-' + currentUser.id;
-                                await API.request('POST', '/api/notifications/subscribe', {
-                                    endpoint: endpoint,
-                                    keys: { p256dh: 'mock-p256dh', auth: 'mock-auth' }
-                                }).catch(e => console.error('Mock subscription sync failed:', e));
-                            }
-                        })
-                        .catch(err => {
-                            console.error('Service Worker registration failed:', err);
-                            showToast('רישום ה-Service Worker נכשל.', 'error');
-                        });
+                        if (!messaging) {
+                            await initFirebase();
+                        }
+
+                        if (messaging) {
+                            const fcmToken = await messaging.getToken({ serviceWorkerRegistration: reg });
+                            console.log('[FCM Client] Token successfully retrieved:', fcmToken);
+
+                            // Sync subscription on backend
+                            await API.request('POST', '/api/notifications/subscribe', {
+                                fcm_token: fcmToken
+                            });
+                        } else {
+                            throw new Error('FCM messaging SDK not initialized');
+                        }
+                    } catch (err) {
+                        console.warn('[FCM Client] Subscription failed, falling back to mock registration:', err);
+                        // Fallback/Mock registration sync
+                        const mockToken = 'mock-fcm-token-' + currentUser.id;
+                        await API.request('POST', '/api/notifications/subscribe', {
+                            fcm_token: mockToken
+                        }).catch(e => console.error('Mock FCM subscription sync failed:', e));
+                    }
                 }
                 
                 // Default categories if not set

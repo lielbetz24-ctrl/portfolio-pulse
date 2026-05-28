@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
-const webpush = require('./webpush');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, '..');
@@ -170,48 +169,103 @@ function writeDb(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 }
 
-function ensureVapidKeys(db) {
-  if (!db.vapidKeys || !db.vapidKeys.publicKey || !db.vapidKeys.privateKeyPem) {
-    console.log('[VAPID] Generating new persistent P-256 VAPID keypair...');
-    db.vapidKeys = webpush.generateVapidKeys();
-    writeDb(db);
+const https = require('https');
+
+function sendFcmNotification(token, title, body, icon) {
+  const serverKey = process.env.FIREBASE_SERVER_KEY;
+  if (!serverKey) {
+    console.warn('[FCM] FIREBASE_SERVER_KEY is not defined. Skipping notification.');
+    return Promise.resolve({ success: false, error: 'FIREBASE_SERVER_KEY missing' });
   }
-  return db.vapidKeys;
+
+  const payload = {
+    to: token,
+    notification: {
+      title: title,
+      body: body,
+      icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+      click_action: '/'
+    },
+    data: {
+      title: title,
+      body: body,
+      icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
+    }
+  };
+
+  const payloadString = JSON.stringify(payload);
+
+  const options = {
+    method: 'POST',
+    hostname: 'fcm.googleapis.com',
+    path: '/fcm/send',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `key=${serverKey}`
+    }
+  };
+
+  return new Promise((resolve) => {
+    const req = https.request(options, (res) => {
+      let resBody = '';
+      res.on('data', chunk => resBody += chunk);
+      res.on('end', () => {
+        console.log(`[FCM Service] Request status: ${res.statusCode}`);
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            const parsed = JSON.parse(resBody);
+            if (parsed.results && parsed.results[0] && parsed.results[0].error) {
+              const fcmError = parsed.results[0].error;
+              console.warn(`[FCM Service] Delivery failed with error: ${fcmError}`);
+              resolve({ success: false, error: fcmError, invalidToken: ['NotRegistered', 'InvalidRegistration'].includes(fcmError) });
+            } else {
+              resolve({ success: true, response: parsed });
+            }
+          } catch (e) {
+            resolve({ success: true, rawResponse: resBody });
+          }
+        } else {
+          resolve({ success: false, statusCode: res.statusCode, error: resBody });
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('[FCM Service] Connection error:', err.message);
+      resolve({ success: false, error: err.message });
+    });
+
+    req.write(payloadString);
+    req.end();
+  });
 }
 
-async function triggerPushNotification(db, targetUserId, payloadObj) {
-  const vapidKeys = db.vapidKeys;
-  if (!vapidKeys) {
-    console.warn('[Push Trigger] No VAPID keys generated yet.');
-    return;
-  }
-  
+async function triggerFcmNotification(db, targetUserId, title, body) {
   db.subscriptions = db.subscriptions || [];
   let targets = [];
+  
   if (targetUserId) {
     targets = db.subscriptions.filter(s => s.user_id === targetUserId);
   } else {
     targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
   }
+
+  console.log(`[FCM Trigger] Dispatching push to ${targets.length} tokens for target: ${targetUserId || 'all clients'}`);
   
-  console.log(`[Push Trigger] Sending push to ${targets.length} subscription(s) for user: ${targetUserId || 'all clients'}`);
-  
-  const payloadString = JSON.stringify(payloadObj);
+  const icon = 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png';
   
   const promises = targets.map(subRecord => {
-    const subscription = subRecord.subscription || { endpoint: subRecord.endpoint, keys: subRecord.keys };
-    
-    if (subscription.endpoint.startsWith('mock-')) {
-      console.log(`[Push Trigger] Skipping mock subscription for user ${subRecord.user_id}`);
+    const token = subRecord.fcm_token || subRecord.endpoint;
+    if (!token || token.startsWith('mock-')) {
       return Promise.resolve({ success: true, mock: true });
     }
-    
-    return webpush.sendNotification(vapidKeys, subscription, payloadString)
+
+    return sendFcmNotification(token, title, body, icon)
       .then(res => {
         if (!res.success) {
-          console.warn(`[Push Trigger] Failed to send push for subscription ${subRecord.id} (user ${subRecord.user_id}):`, res.error || res.statusCode);
-          if (res.statusCode === 410 || res.statusCode === 404) {
-            console.log(`[Push Trigger] Removing expired subscription: ${subRecord.id}`);
+          console.warn(`[FCM Trigger] Failed to deliver to ${subRecord.id}:`, res.error);
+          if (res.invalidToken || res.statusCode === 404 || res.statusCode === 410) {
+            console.log(`[FCM Trigger] Removing invalid/expired token: ${subRecord.id}`);
             db.subscriptions = db.subscriptions.filter(s => s.id !== subRecord.id);
             writeDb(db);
           }
@@ -219,11 +273,11 @@ async function triggerPushNotification(db, targetUserId, payloadObj) {
         return res;
       })
       .catch(err => {
-        console.error(`[Push Trigger] Error sending push for subscription ${subRecord.id}:`, err);
+        console.error(`[FCM Trigger] Error dispatching to ${subRecord.id}:`, err.message);
         return { success: false, error: err.message };
       });
   });
-  
+
   await Promise.all(promises);
 }
 
@@ -797,12 +851,9 @@ async function handleApi(req, res, pathname, query) {
 
     writeDb(db);
 
-    // Trigger Web Push Notification asynchronously
-    triggerPushNotification(db, targetUser, {
-      title: notifTitle,
-      body: notifBody,
-      icon: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
-    }).catch(err => console.error('[Push Trigger] Async push notification error:', err));
+    // Trigger Firebase Cloud Messaging Notification asynchronously
+    triggerFcmNotification(db, targetUser, notifTitle, notifBody)
+      .catch(err => console.error('[FCM Trigger] Async FCM notification error:', err));
 
     // Dynamic real-time WebSockets event triggering
     if (body.recommender === 'client') {
@@ -891,26 +942,30 @@ async function handleApi(req, res, pathname, query) {
     }
   }
 
-  if (pathname === '/api/notifications/vapid-public-key' && req.method === 'GET') {
-    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    const keys = ensureVapidKeys(db);
-    return sendJson(res, 200, { publicKey: keys.publicKey });
+  if (pathname === '/api/notifications/firebase-config' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      apiKey: process.env.FIREBASE_API_KEY || 'mock-api-key',
+      projectId: process.env.FIREBASE_PROJECT_ID || 'mock-project-id',
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || 'mock-sender-id',
+      appId: process.env.FIREBASE_APP_ID || 'mock-app-id'
+    });
   }
 
   if (pathname === '/api/notifications/subscribe' && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
+    const { fcm_token } = body;
+    if (!fcm_token) return sendJson(res, 400, { error: 'fcm_token missing' });
+
     const db = readDb();
     db.subscriptions = db.subscriptions || [];
     
-    const idx = db.subscriptions.findIndex(s => s.user_id === user.id && s.endpoint === body.endpoint);
+    const idx = db.subscriptions.findIndex(s => s.user_id === user.id && s.fcm_token === fcm_token);
     if (idx === -1) {
       db.subscriptions.push({
         id: uid('sub'),
         user_id: user.id,
-        endpoint: body.endpoint,
-        subscription: body,
+        fcm_token: fcm_token,
         created_at: new Date().toISOString()
       });
       writeDb(db);
@@ -1096,7 +1151,6 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 const db = readDb();
-ensureVapidKeys(db);
 startDailyAITipsCron();
 server.listen(PORT, () => {
   console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
