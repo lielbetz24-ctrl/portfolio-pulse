@@ -1886,10 +1886,15 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     }
 
     .app-header {
-        padding: 16px 14px;
-        flex-direction: column;
-        align-items: flex-start;
+        padding: 48px 14px 16px 14px !important; /* Lower the title slightly from the top to fit mobile notch */
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
         gap: 12px;
+        background: rgba(8, 10, 15, 0.6) !important;
+        width: 100%;
+        border-bottom: 1px solid var(--card-border);
     }
     
     .header-actions {
