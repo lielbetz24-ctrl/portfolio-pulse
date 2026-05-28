@@ -520,7 +520,18 @@ async function handleApi(req, res, pathname, query) {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const db = readDb();
     await generateDailyAITips(db);
-    const tips = db.tips.map(t => ({ id: t.id, advisor_id: t.advisor_id, recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), ticker: t.ticker, content: t.content, date: t.date || t.created_at?.split('T')[0] }));
+    const tips = db.tips.map(t => ({
+      id: t.id,
+      advisor_id: t.advisor_id,
+      recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'),
+      ticker: t.ticker,
+      content: t.content,
+      target_user_id: t.target_user_id || null,
+      is_read: t.is_read || false,
+      created_at: t.created_at || null,
+      timestamp: t.timestamp || null,
+      date: t.date || t.created_at?.split('T')[0]
+    }));
     
     // Compile current cached prices from PRICE_CACHE
     const prices = {};
@@ -618,6 +629,9 @@ async function handleApi(req, res, pathname, query) {
       ticker: t.ticker, 
       content: t.content, 
       target_user_id: t.target_user_id || null,
+      is_read: t.is_read || false,
+      created_at: t.created_at || null,
+      timestamp: t.timestamp || null,
       date: t.date || t.created_at?.split('T')[0] 
     }));
     return sendJson(res, 200, { tips });
@@ -647,6 +661,9 @@ async function handleApi(req, res, pathname, query) {
       ticker: body.ticker ? body.ticker.toUpperCase() : null,
       content: body.content.trim(),
       target_user_id: targetUserId,
+      is_read: false,
+      created_at: new Date().toISOString(),
+      timestamp: Date.now(),
       date: new Date().toISOString().split('T')[0]
     };
     db.tips.push(tip);
@@ -918,6 +935,24 @@ server.on('upgrade', (req, socket, head) => {
             const msg = JSON.parse(msgText);
             if (msg.type === 'ping') {
               socket.write(encodeWSFrame(JSON.stringify({ type: 'pong' })));
+            } else if (msg.type === 'mark_as_read') {
+              const db = readDb();
+              let updated = false;
+              db.tips = db.tips || [];
+              db.tips.forEach(t => {
+                if (t.target_user_id === msg.userId && t.recommender === 'avi' && !t.is_read) {
+                  t.is_read = true;
+                  updated = true;
+                }
+              });
+              if (updated) {
+                writeDb(db);
+                // Broadcast message read event to advisor Avi
+                sendWebSocketMessage('u_admin_avi', {
+                  type: 'messages_read',
+                  userId: msg.userId
+                });
+              }
             }
           } catch (e) {
             console.error('[WS Message] Error processing text frame:', e.message);

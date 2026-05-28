@@ -110,18 +110,28 @@ function initWebSocket() {
                 }
                 
                 if (currentUser.role === 'client') {
+                    const chatDrawer = document.getElementById('personal-chat-drawer');
+                    const isDrawerOpen = chatDrawer && chatDrawer.style.right === '0px';
+                    
+                    if (isDrawerOpen) {
+                        // Mark as read instantly if drawer is open
+                        tip.is_read = true;
+                        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                            wsClient.send(JSON.stringify({ type: 'mark_as_read', userId: currentUser.id }));
+                        }
+                    }
+                    
                     // Update client UI
                     renderPersonalTips();
                     
                     // Increment personal chat badge if drawer is closed
-                    const chatDrawer = document.getElementById('personal-chat-drawer');
-                    const isDrawerOpen = chatDrawer && chatDrawer.style.right === '0px';
                     if (!isDrawerOpen) {
                         const chatBadge = document.getElementById('personal-chat-badge');
                         if (chatBadge) {
                             const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender === 'avi');
-                            chatBadge.textContent = personalTips.length.toString();
-                            chatBadge.style.display = 'flex';
+                            const unreadTips = personalTips.filter(t => !t.is_read);
+                            chatBadge.textContent = unreadTips.length.toString();
+                            chatBadge.style.display = unreadTips.length > 0 ? 'flex' : 'none';
                         }
                         
                         // Show visual toast if drawer is closed
@@ -145,6 +155,15 @@ function initWebSocket() {
                     // Show advisor notification toast
                     const senderName = tip.sender_name || 'הלקוח';
                     showToast(`התקבלה הודעה חדשה מ-${senderName}: ${tip.content}`, 'success');
+                }
+            } else if (msg.type === 'messages_read') {
+                if (currentUser.role === 'admin' && activeViewingClientId === msg.userId) {
+                    allTips.forEach(t => {
+                        if (t.target_user_id === msg.userId && t.recommender === 'avi') {
+                            t.is_read = true;
+                        }
+                    });
+                    renderAdminClientChatHistory();
                 }
             } else if (msg.type === 'new_daily_ai_tips') {
                 const tips = msg.data;
@@ -2814,16 +2833,11 @@ async function pollNotifications() {
 /* ==================== 11. ניהול טיפים אישיים לקוח ומודל מנהל ==================== */
 
 function renderPersonalTips() {
-    const sectionEl = document.getElementById('personal-tips-section');
-    const listEl = document.getElementById('personal-tips-list');
-    const countEl = document.getElementById('personal-tips-count');
-    
     // Floating Widget Elements
     const chatWidget = document.getElementById('personal-chat-widget');
     const chatBadge = document.getElementById('personal-chat-badge');
     
     if (!currentUser || currentUser.role !== 'client') {
-        if (sectionEl) sectionEl.style.display = 'none';
         if (chatWidget) chatWidget.style.display = 'none';
         return;
     }
@@ -2833,61 +2847,18 @@ function renderPersonalTips() {
     
     // Show/Hide Floating Widget (Bubble appears only if Avi has initiated a personal recommendation/tip)
     const aviInitiatedTips = personalTips.filter(t => t.recommender === 'avi');
+    const unreadAviTips = aviInitiatedTips.filter(t => !t.is_read);
+    
     if (chatWidget) {
         if (aviInitiatedTips.length > 0) {
             chatWidget.style.display = 'flex';
             if (chatBadge) {
-                // Number of total messages from Avi in the thread
-                chatBadge.textContent = aviInitiatedTips.length.toString();
+                // Show unread messages count
+                chatBadge.textContent = unreadAviTips.length.toString();
+                chatBadge.style.display = unreadAviTips.length > 0 ? 'flex' : 'none';
             }
         } else {
             chatWidget.style.display = 'none';
-        }
-    }
-    
-    if (countEl) {
-        countEl.textContent = `${aviInitiatedTips.length} הודעות`;
-    }
-    
-    if (personalTips.length === 0) {
-        if (sectionEl) sectionEl.style.display = 'none';
-        if (listEl) listEl.innerHTML = '';
-        return;
-    }
-    
-    // Keep the inline list display updated too!
-    if (sectionEl && listEl) {
-        // Show inline card only if there are recommendations from Avi (not replies)
-        if (aviInitiatedTips.length > 0) {
-            sectionEl.style.display = 'block';
-            listEl.innerHTML = '';
-            
-            const sortedTips = [...aviInitiatedTips].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-            sortedTips.forEach(tip => {
-                const div = document.createElement('div');
-                div.className = 'tip-item';
-                div.style.background = 'rgba(163, 52, 255, 0.04)';
-                div.style.border = '1px solid rgba(163, 52, 255, 0.15)';
-                
-                const dateStr = tip.date || (tip.created_at ? tip.created_at.split('T')[0] : '');
-                const dateTag = dateStr ? `<span style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.4); margin-right: auto; direction: ltr;">${dateStr}</span>` : '';
-                
-                div.innerHTML = `
-                    <div class="tip-icon purple" style="background: rgba(163, 52, 255, 0.1); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a334ff;">
-                        <span class="material-icons-round">campaign</span>
-                    </div>
-                    <div class="tip-content" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                        <div style="display: flex; align-items: center; width: 100%;">
-                            <span class="tip-title" style="color: #a334ff; font-weight: 700; font-size: 0.95rem;">הודעה אישית מאבי (יועץ ההשקעות)</span>
-                            ${dateTag}
-                        </div>
-                        <span class="tip-desc" style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;">${tip.content}</span>
-                    </div>
-                `;
-                listEl.appendChild(div);
-            });
-        } else {
-            sectionEl.style.display = 'none';
         }
     }
     
@@ -2976,6 +2947,26 @@ function openPersonalChatDrawer() {
     const drawer = document.getElementById('personal-chat-drawer');
     if (drawer) {
         drawer.style.right = '0px';
+        
+        // Reset and hide unread badge
+        const chatBadge = document.getElementById('personal-chat-badge');
+        if (chatBadge) {
+            chatBadge.style.display = 'none';
+            chatBadge.textContent = '0';
+        }
+        
+        // Notify server that messages are read
+        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+            wsClient.send(JSON.stringify({ type: 'mark_as_read', userId: currentUser.id }));
+        }
+        
+        // Mark locally as read to avoid wait delay
+        allTips.forEach(t => {
+            if (t.target_user_id === currentUser.id && t.recommender === 'avi') {
+                t.is_read = true;
+            }
+        });
+        
         renderPersonalChatMessages();
     }
 }
@@ -2993,7 +2984,7 @@ function renderPersonalChatMessages() {
     
     container.innerHTML = '';
     
-    // Personal conversation thread = Avi tips to this user + client replies
+    // Personal conversation thread = Avi tips to Liel + Liel replies
     const thread = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
     
     // Sort chronologically
@@ -3005,43 +2996,75 @@ function renderPersonalChatMessages() {
     }
     
     thread.forEach(msg => {
-        const div = document.createElement('div');
         const isClient = msg.recommender === 'client';
         
+        // Create wrapper div for layout alignment
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.width = '100%';
+        wrapper.style.direction = 'ltr'; // LTR wrapper for proper flexbox alignment
+        wrapper.style.alignItems = 'flex-end';
+        wrapper.style.marginBottom = '12px';
+        
+        const div = document.createElement('div');
         div.style.display = 'flex';
         div.style.flexDirection = 'column';
         div.style.maxWidth = '75%';
         div.style.padding = '10px 14px';
-        div.style.borderRadius = 'var(--radius-md)';
         div.style.fontSize = '0.9rem';
         div.style.lineHeight = '1.4';
         div.style.whiteSpace = 'pre-wrap';
-        div.style.marginBottom = '6px';
+        div.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+        div.style.direction = 'rtl'; // RTL text support
+        div.style.textAlign = 'right';
         
         if (isClient) {
-            // Client bubble aligned left/right accordingly
-            div.style.alignSelf = 'flex-start';
+            wrapper.style.justifyContent = 'flex-start';
             div.style.background = 'rgba(255, 255, 255, 0.05)';
             div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
             div.style.color = 'var(--text-primary)';
             div.style.borderRadius = '16px 16px 16px 2px';
+            
+            const timeStr = msg.date || '';
+            const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: flex-end;">${timeStr}</span>` : '';
+            
+            div.innerHTML = `
+                <span>${msg.content}</span>
+                ${timeSpan}
+            `;
+            wrapper.appendChild(div);
         } else {
-            // Advisor bubble
-            div.style.alignSelf = 'flex-end';
+            // Advisor message (with round photo on the right of the bubble)
+            wrapper.style.justifyContent = 'flex-end';
             div.style.background = 'rgba(163, 52, 255, 0.15)';
             div.style.border = '1px solid rgba(163, 52, 255, 0.3)';
             div.style.color = '#e2beff';
             div.style.borderRadius = '16px 16px 2px 16px';
+            
+            const timeStr = msg.date || '';
+            const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: flex-start;">${timeStr}</span>` : '';
+            
+            div.innerHTML = `
+                <span>${msg.content}</span>
+                ${timeSpan}
+            `;
+            
+            const img = document.createElement('img');
+            img.src = 'avi_profile.jpg';
+            img.style.width = '32px';
+            img.style.height = '32px';
+            img.style.borderRadius = '50%';
+            img.style.objectFit = 'cover';
+            img.style.border = '1px solid #a334ff';
+            img.style.marginLeft = '8px';
+            img.style.flexShrink = '0';
+            img.style.alignSelf = 'flex-end';
+            
+            wrapper.appendChild(div);
+            wrapper.appendChild(img);
         }
         
-        const timeStr = msg.date || '';
-        const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: ${isClient ? 'flex-end' : 'flex-start'};">${timeStr}</span>` : '';
-        
-        div.innerHTML = `
-            <span>${msg.content}</span>
-            ${timeSpan}
-        `;
-        container.appendChild(div);
+        container.appendChild(wrapper);
     });
     
     // Scroll to bottom
@@ -3111,9 +3134,17 @@ function renderAdminClientChatHistory() {
     }
     
     thread.forEach(msg => {
-        const div = document.createElement('div');
         const isClient = msg.recommender === 'client';
         
+        // Create wrapper div for layout alignment
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.width = '100%';
+        wrapper.style.direction = 'ltr'; // LTR wrapper for proper flexbox alignment
+        wrapper.style.alignItems = 'flex-end';
+        wrapper.style.marginBottom = '12px';
+        
+        const div = document.createElement('div');
         div.style.display = 'flex';
         div.style.flexDirection = 'column';
         div.style.maxWidth = '75%';
@@ -3122,34 +3153,70 @@ function renderAdminClientChatHistory() {
         div.style.fontSize = '0.9rem';
         div.style.lineHeight = '1.4';
         div.style.whiteSpace = 'pre-wrap';
-        div.style.marginBottom = '6px';
+        div.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+        div.style.direction = 'rtl'; // RTL text support
+        div.style.textAlign = 'right';
         
         if (isClient) {
-            // Client bubble (on the left for Admin view)
-            div.style.alignSelf = 'flex-start';
+            wrapper.style.justifyContent = 'flex-start';
             div.style.background = 'rgba(255, 255, 255, 0.05)';
             div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
             div.style.color = 'var(--text-primary)';
             div.style.borderRadius = '16px 16px 16px 2px';
+            
+            const senderName = 'הלקוח';
+            const timeStr = msg.date || '';
+            const timeSpan = timeStr ? `<div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 4px;">
+                <span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3);">${timeStr}</span>
+            </div>` : '';
+            
+            div.innerHTML = `
+                <strong style="font-size: 0.72rem; color: var(--accent-blue-start); margin-bottom: 2px;">${senderName}:</strong>
+                <span>${msg.content}</span>
+                ${timeSpan}
+            `;
+            wrapper.appendChild(div);
         } else {
-            // Admin bubble (on the right for Admin view)
-            div.style.alignSelf = 'flex-end';
+            wrapper.style.justifyContent = 'flex-end';
             div.style.background = 'rgba(163, 52, 255, 0.15)';
             div.style.border = '1px solid rgba(163, 52, 255, 0.3)';
             div.style.color = '#e2beff';
             div.style.borderRadius = '16px 16px 2px 16px';
+            
+            const senderName = 'אני';
+            const timeStr = msg.date || '';
+            
+            // Read receipt checkmark for Avi's messages
+            const checkColor = msg.is_read ? '#2196F3' : 'rgba(255, 255, 255, 0.35)';
+            const checkmarks = `<span class="material-icons-round" style="font-size: 15px; color: ${checkColor}; margin-right: 6px; vertical-align: middle;">done_all</span>`;
+            
+            const timeSpan = timeStr ? `<div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 4px;">
+                <span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3);">${timeStr}</span>
+                ${checkmarks}
+            </div>` : '';
+            
+            div.innerHTML = `
+                <strong style="font-size: 0.72rem; color: #a334ff; margin-bottom: 2px;">${senderName}:</strong>
+                <span>${msg.content}</span>
+                ${timeSpan}
+            `;
+            
+            const img = document.createElement('img');
+            img.src = 'avi_profile.jpg';
+            img.style.width = '32px';
+            img.style.height = '32px';
+            img.style.borderRadius = '50%';
+            img.style.objectFit = 'cover';
+            img.style.border = '1px solid #a334ff';
+            img.style.marginLeft = '8px';
+            img.style.flexShrink = '0';
+            img.style.alignSelf = 'flex-end';
+            
+            wrapper.appendChild(div);
+            wrapper.appendChild(img);
         }
         
-        const senderName = isClient ? 'הלקוח' : 'אני';
-        const timeStr = msg.date || '';
-        const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: ${isClient ? 'flex-end' : 'flex-start'};">${timeStr}</span>` : '';
-        
-        div.innerHTML = `
-            <strong style="font-size: 0.72rem; color: ${isClient ? 'var(--accent-blue-start)' : '#a334ff'}; margin-bottom: 2px;">${senderName}:</strong>
-            <span>${msg.content}</span>
-            ${timeSpan}
-        `;
-        container.appendChild(div);
+        container.appendChild(wrapper);
     });
     
     // Scroll to bottom
