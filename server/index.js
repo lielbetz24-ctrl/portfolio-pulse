@@ -510,15 +510,24 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/tips' && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    if (user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
     const body = await readBody(req);
     if (!body.content?.trim()) return sendJson(res, 400, { error: 'נא להזין תוכן להמלצה' });
-    const db = readDb();
     
+    const isClientMessage = body.recommender === 'client';
+    if (user.role !== 'admin' && !isClientMessage) {
+      return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
+    }
+    
+    // Ensure client can only message/reply to themselves
+    if (user.role === 'client' && body.target_user_id !== user.id) {
+      return sendJson(res, 403, { error: 'אין הרשאה לשלוח הודעה למשתמש אחר' });
+    }
+
+    const db = readDb();
     const targetUserId = body.target_user_id || null;
     const tip = {
       id: uid('t'),
-      advisor_id: user.id,
+      advisor_id: user.role === 'admin' ? user.id : 'u_admin_avi',
       recommender: body.recommender || 'avi',
       ticker: body.ticker ? body.ticker.toUpperCase() : null,
       content: body.content.trim(),
@@ -530,7 +539,13 @@ async function handleApi(req, res, pathname, query) {
     // Trigger push notification by category
     let notifTitle = '';
     let notifBody = '';
-    if (targetUserId) {
+    let targetUser = targetUserId;
+
+    if (body.recommender === 'client') {
+      notifTitle = `הודעה חדשה מ-${user.name}`;
+      notifBody = body.content.trim();
+      targetUser = 'u_admin_avi'; // Send notification to Avi
+    } else if (targetUserId) {
       notifTitle = 'הודעה אישית מאבי';
       notifBody = 'התקבלה המלצה חדשה המותאמת אישית לתיק ההשקעות שלך. לחץ לצפייה.';
     } else {
@@ -540,7 +555,7 @@ async function handleApi(req, res, pathname, query) {
 
     const newNotif = {
       id: uid('nt'),
-      user_id: targetUserId,
+      user_id: targetUser,
       title: notifTitle,
       body: notifBody,
       created_at: new Date().toISOString(),

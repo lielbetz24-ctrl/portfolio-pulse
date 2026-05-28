@@ -248,6 +248,18 @@
                                 <span class="text-muted">מתחילת הפעילות</span>
                             </div>
                         </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="text-muted">שינוי יומי (תשואה)</span>
+                                <span class="material-icons-round metric-icon" id="daily-pnl-icon" style="color: var(--warning-gold);">show_chart</span>
+                            </div>
+                            <div class="metric-value" id="val-daily-pnl">$0.00</div>
+                            <div class="metric-footer" id="val-daily-pnl-footer">
+                                <span class="pnl-percent" id="val-daily-pnl-pct">+0.00%</span>
+                                <span class="text-muted">ביום המסחר הנוכחי</span>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="dashboard-visuals">
@@ -340,35 +352,32 @@
                     </div>
                 </div>
 
-                <!-- 3. יועץ השקעות AI (AI Advisor) -->
-                <div id="view-ai-advisor-pane" class="tab-pane">
-                    <div class="ai-advisor-grid">
-                        <div class="visual-card ai-chat-card">
-                            <div class="ai-chat-header">
-                                <div class="ai-avatar">
-                                    <span class="material-icons-round">psychology</span>
-                                </div>
-                                <div class="ai-status">
-                                    <h4>PortfolioPulse AI Advisor</h4>
-                                    <span class="status-indicator online">מחובר ומנתח את התיק שלך</span>
-                                </div>
+                <!-- 3. צ'אט יועץ AI (Live AI Chat) -->
+                <div id="view-ai-chat-pane" class="tab-pane">
+                    <div class="visual-card ai-chat-card" style="max-width: 800px; margin: 0 auto; height: calc(100vh - 240px); display: flex; flex-direction: column;">
+                        <div class="ai-chat-header">
+                            <div class="ai-avatar">
+                                <span class="material-icons-round">psychology</span>
                             </div>
-                            <div class="chat-messages" id="chat-messages-container"></div>
-                            <div class="suggested-prompts-row" id="suggested-prompts"></div>
-                            <form class="chat-input-area" onsubmit="handleSendMessage(event)">
-                                <input type="text" id="chat-input-text" placeholder="שאל את ה-AI על התיק שלך, ביזור נכסים או מניות ספציפיות..." autocomplete="off">
-                                <button type="submit" class="btn-send">
-                                    <span class="material-icons-round">send</span>
-                                </button>
-                            </form>
+                            <div class="ai-status">
+                                <h4>PortfolioPulse AI Advisor</h4>
+                                <span class="status-indicator online">מחובר ומנתח את התיק שלך</span>
+                            </div>
                         </div>
+                        <div class="chat-messages" id="chat-messages-container" style="flex: 1; overflow-y: auto;"></div>
+                        <div class="suggested-prompts-row" id="suggested-prompts"></div>
+                        <form class="chat-input-area" onsubmit="handleSendMessage(event)">
+                            <input type="text" id="chat-input-text" placeholder="שאל את ה-AI על התיק שלך, ביזור נכסים או מניות ספציפיות..." autocomplete="off">
+                            <button type="submit" class="btn-send">
+                                <span class="material-icons-round">send</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
 
-                        <div class="ai-insights-panel">
-                            <div class="visual-card health-score-card">
-                                <h3>ציון בריאות תיק AI</h3>
-                                <div class="score-circle-container">
-                                    <div class="score-circle" id="health-score-value">85</div>
-                                    <svg class="score-svg" viewBox="0 0 100 100">
+                <!-- 4. המלצות וטיפים (AI & Community Recommendations) -->
+                <div id="view-ai-tips-pane" class="tab-pane">
+                    <div class="ai-advisor-grid">
                                         <circle class="score-bg-ring" cx="50" cy="50" r="45"></circle>
                                         <circle class="score-fill-ring" id="score-ring" cx="50" cy="50" r="45" stroke-dasharray="283" stroke-dashoffset="42"></circle>
                                     </svg>
@@ -556,6 +565,23 @@
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+
+                    <!-- צ'אט והיסטוריית שיחות עם הלקוח -->
+                    <div class="visual-card full-width" style="margin-top: 24px;">
+                        <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 12px; margin-bottom: 16px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="material-icons-round" style="color: var(--accent-purple-start);">chat</span>
+                                <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700;">שיחה והתקשרות אישית עם הלקוח</h3>
+                            </div>
+                        </div>
+                        <div id="admin-client-chat-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: var(--radius-md); margin-bottom: 16px;">
+                            <!-- הודעות השיחה ימולאו דינמית -->
+                        </div>
+                        <form id="admin-client-chat-form" onsubmit="handleAdminChatSubmit(event)" style="display: flex; gap: 10px;">
+                            <input type="text" id="admin-client-chat-input" placeholder="כתוב הודעה אישית ללקוח זה (ההודעה תופיע בבועה הצפה אצלו)..." required style="flex: 1; padding: 12px 16px; background: rgba(15, 20, 30, 0.8); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.95rem;">
+                            <button type="submit" class="btn btn-primary" style="padding: 10px 24px;">שלח הודעה</button>
+                        </form>
                     </div>
                 </div>
 
@@ -848,6 +874,55 @@
                 </div>
             </form>
         </div>
+    </div>
+
+    <!-- בועה צפה לשיחה והמלצות אישיות מאבי (Avi Personal Chat Bubble & Drawer) -->
+    <div id="personal-chat-widget" style="position: fixed; bottom: 30px; right: 30px; z-index: 10000; display: none; align-items: center; gap: 12px; direction: rtl;">
+        <!-- Speech Bubble Tooltip -->
+        <div id="personal-chat-tooltip" style="background: rgba(20, 25, 35, 0.95); border: 1px solid rgba(163, 52, 255, 0.3); border-radius: var(--radius-md); padding: 8px 16px; color: var(--text-primary); font-size: 0.8rem; font-weight: 500; box-shadow: var(--shadow-lg); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap;" onclick="openPersonalChatDrawer()">
+             שיחה אישית עם אבי 💬
+        </div>
+        
+        <!-- The Floating Circle Button -->
+        <button id="personal-chat-bubble-btn" onclick="openPersonalChatDrawer()" style="background: linear-gradient(135deg, #a334ff 0%, #6f17e3 100%); border: none; width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; box-shadow: 0 8px 32px rgba(163, 52, 255, 0.4); border: 2px solid rgba(255,255,255,0.1); position: relative; transition: transform 0.3s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+            <span class="material-icons-round" style="font-size: 28px;">chat</span>
+            <span id="personal-chat-badge" style="position: absolute; top: -2px; right: -2px; background: var(--neg-red); color: white; border-radius: 50%; width: 20px; height: 20px; font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid var(--body-bg);">0</span>
+        </button>
+    </div>
+
+    <!-- צ'אט מגירה צף (Floating Chat Drawer) -->
+    <div id="personal-chat-drawer" style="position: fixed; top: 0; right: -420px; width: 400px; height: 100%; background: rgba(15, 20, 30, 0.98); border-left: 1px solid rgba(255, 255, 255, 0.08); box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5); z-index: 10001; display: flex; flex-direction: column; transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(20px); direction: rtl;">
+        <!-- Header -->
+        <div style="padding: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); display: flex; align-items: center; justify-content: space-between; background: linear-gradient(to left, rgba(163, 52, 255, 0.1), transparent);">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="background: rgba(163, 52, 255, 0.15); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a334ff;">
+                    <span class="material-icons-round">person</span>
+                </div>
+                <div>
+                    <h4 style="margin: 0; font-size: 1rem; font-weight: 700; color: var(--text-primary);">אבי - יועץ השקעות</h4>
+                    <span style="font-size: 0.72rem; color: var(--pos-green); display: flex; align-items: center; gap: 4px;">
+                        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--pos-green); display: inline-block;"></span>
+                        מחובר ומעודכן
+                    </span>
+                </div>
+            </div>
+            <button onclick="closePersonalChatDrawer()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 6px; border-radius: 50%; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='none'">
+                <span class="material-icons-round">close</span>
+            </button>
+        </div>
+        
+        <!-- Conversation Area -->
+        <div id="personal-chat-messages-container" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+            <!-- Messages populated dynamically -->
+        </div>
+        
+        <!-- Input Footer -->
+        <form id="personal-chat-form" onsubmit="handlePersonalChatSubmit(event)" style="padding: 20px; border-top: 1px solid rgba(255, 255, 255, 0.05); display: flex; gap: 10px; background: rgba(10, 12, 18, 0.5);">
+            <input type="text" id="personal-chat-input" placeholder="כתוב הודעה / תגובה לאבי..." required style="flex: 1; padding: 12px 16px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.9rem;" autocomplete="off">
+            <button type="submit" style="background: var(--accent-purple-start); border: none; width: 44px; height: 44px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#8c22eb'" onmouseout="this.style.background='var(--accent-purple-start)'">
+                <span class="material-icons-round">send</span>
+            </button>
+        </form>
     </div>
 
     <!-- הודעות התראה קופצות (Toasts) -->

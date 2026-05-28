@@ -182,34 +182,7 @@ async function fetchLivePrices() {
     // הוספה תמיד של שער החליפין דולר/שקל לרשימת הסנכרון
     uniqueTickersSet.add('ILS=X');
     
-    // סינון מניות פעילות לפי אזורי זמן מסחר (אלא אם כן זו טעינה ראשונית)
-    const activeTickers = [];
-    uniqueTickersSet.forEach(ticker => {
-        if (ticker === 'ILS=X') {
-            activeTickers.push(ticker);
-        } else if (!isInitialPricesLoaded || PortfolioEngine.isAssetMarketOpen(ticker)) {
-            activeTickers.push(ticker);
-        }
-    });
-    
-    // אם כל השווקים הרלוונטיים סגורים והמחירים הראשוניים כבר נטענו — נקפיא את העדכון ונציג חיווי מתאים
-    const hasOnlyILS = activeTickers.length === 1 && activeTickers[0] === 'ILS=X';
-    if (hasOnlyILS && isInitialPricesLoaded) {
-        if (syncIcon) syncIcon.style.animation = 'none';
-        if (syncStatusText) {
-            syncStatusText.textContent = 'שוק סגור (נעילה) | השערים מוקפאים';
-        }
-        if (syncBadge) {
-            syncBadge.style.background = 'rgba(255, 193, 7, 0.08)'; // צהוב אזהרה יוקרתי
-            syncBadge.style.color = 'var(--warning-gold)';
-            syncBadge.style.borderColor = 'rgba(255, 193, 7, 0.2)';
-        }
-        // נריץ בכל זאת פולינג להתראות דחיפה ברקע
-        pollNotifications();
-        return;
-    }
-    
-    const tickersList = activeTickers;
+    const tickersList = Array.from(uniqueTickersSet);
     if (tickersList.length === 0) return;
     
     isLiveSyncing = true;
@@ -401,10 +374,14 @@ function renderSidebarNavigation() {
                     <span class="material-icons-round">history</span>
                     <span>היסטוריית עסקאות</span>
                 </button>
-                <button class="nav-item nav-accent" onclick="switchView('ai-advisor')" id="nav-ai-advisor">
-                    <span class="material-icons-round sparkle-icon">psychology</span>
-                    <span>יועץ השקעות AI</span>
-                    <span class="badge">Live</span>
+                <button class="nav-item nav-accent" onclick="switchView('ai-chat')" id="nav-ai-chat">
+                    <span class="material-icons-round sparkle-icon" style="color: #a334ff;">psychology</span>
+                    <span>צ'אט יועץ AI</span>
+                    <span class="badge" style="background: #a334ff; color: white;">Live</span>
+                </button>
+                <button class="nav-item" onclick="switchView('ai-tips')" id="nav-ai-tips">
+                    <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
+                    <span>המלצות וטיפים</span>
                 </button>
             `;
         }
@@ -433,10 +410,14 @@ function renderSidebarNavigation() {
                     <span class="material-icons-round">history</span>
                     <span>היסטוריית עסקאות</span>
                 </button>
-                <button class="mobile-nav-item mobile-nav-accent" onclick="switchView('ai-advisor')" id="mobile-nav-ai-advisor">
-                    <span class="material-icons-round sparkle-icon">psychology</span>
-                    <span>יועץ השקעות AI</span>
-                    <span class="mobile-badge-live">Live</span>
+                <button class="mobile-nav-item mobile-nav-accent" onclick="switchView('ai-chat')" id="mobile-nav-ai-chat">
+                    <span class="material-icons-round sparkle-icon" style="color: #a334ff;">psychology</span>
+                    <span>צ'אט יועץ AI</span>
+                    <span class="mobile-badge-live" style="background: #a334ff; color: white;">Live</span>
+                </button>
+                <button class="mobile-nav-item" onclick="switchView('ai-tips')" id="mobile-nav-ai-tips">
+                    <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
+                    <span>המלצות וטיפים</span>
                 </button>
             `;
         }
@@ -592,9 +573,13 @@ function switchView(view) {
         titleEl.textContent = 'היסטוריית פעולות ועסקאות';
         subtitleEl.textContent = 'רישום מלא של כל פעולות המניות והמזומן שבוצעו בתיק';
         renderTransactionsTable();
-    } else if (view === 'ai-advisor') {
-        titleEl.textContent = 'יועץ השקעות בינה מלאכותית (AI)';
-        subtitleEl.textContent = 'ניתוח עמוק, המלצות מבוססות תיק וצ\'אט ייעוץ מותאם אישית';
+    } else if (view === 'ai-chat') {
+        titleEl.textContent = "צ'אט יועץ השקעות AI";
+        subtitleEl.textContent = 'שיחה חיה, התייעצות אישית וניתוח מעמיק מבוסס בינה מלאכותית';
+        initAIChat();
+    } else if (view === 'ai-tips') {
+        titleEl.textContent = 'המלצות שוק וקהילה';
+        subtitleEl.textContent = 'טיפים אסטרטגיים, מניות מומלצות וציון בריאות התיק שלך';
         renderAITips();
         updateAIHealthScore();
     } else if (view === 'admin-dashboard') {
@@ -658,6 +643,36 @@ function refreshCalculations() {
         pnlPctEl.className = 'pnl-percent pnl-negative';
         pnlIconEl.textContent = 'trending_down';
         pnlIconEl.className = 'material-icons-round metric-icon red';
+    }
+
+    // עדכון תשואה יומית בתיק לפי שעות המסחר הנוכחיות
+    const dailyValEl = document.getElementById('val-daily-pnl');
+    const dailyPctEl = document.getElementById('val-daily-pnl-pct');
+    const dailyIconEl = document.getElementById('daily-pnl-icon');
+    
+    if (dailyValEl && dailyPctEl) {
+        const dailyChangeUSD = metrics.totalDailyChangeUSD || 0;
+        const dailyChangePct = metrics.totalDailyChangePct || 0;
+        
+        if (dailyChangeUSD >= 0) {
+            dailyValEl.textContent = `+${formatCurrency(dailyChangeUSD)}`;
+            dailyValEl.className = 'metric-value pnl-positive';
+            dailyPctEl.textContent = `+${dailyChangePct.toFixed(2)}%`;
+            dailyPctEl.className = 'pnl-percent pnl-positive';
+            if (dailyIconEl) {
+                dailyIconEl.textContent = 'trending_up';
+                dailyIconEl.style.color = 'var(--pos-green)';
+            }
+        } else {
+            dailyValEl.textContent = `-${formatCurrency(Math.abs(dailyChangeUSD))}`;
+            dailyValEl.className = 'metric-value pnl-negative';
+            dailyPctEl.textContent = `${dailyChangePct.toFixed(2)}%`;
+            dailyPctEl.className = 'pnl-percent pnl-negative';
+            if (dailyIconEl) {
+                dailyIconEl.textContent = 'trending_down';
+                dailyIconEl.style.color = 'var(--neg-red)';
+            }
+        }
     }
 
     renderHoldingsTable(metrics.holdingsList);
@@ -2239,6 +2254,9 @@ function viewClientPortfolio(clientId) {
         });
     }
 
+    // רינדור צ'אט עם הלקוח
+    renderAdminClientChatHistory();
+
     // רינדור גרף הנכסים של הלקוח
     renderDetailChart(metrics);
 }
@@ -2669,53 +2687,84 @@ function renderPersonalTips() {
     const listEl = document.getElementById('personal-tips-list');
     const countEl = document.getElementById('personal-tips-count');
     
-    if (!sectionEl || !listEl) return;
+    // Floating Widget Elements
+    const chatWidget = document.getElementById('personal-chat-widget');
+    const chatBadge = document.getElementById('personal-chat-badge');
     
     if (!currentUser || currentUser.role !== 'client') {
-        sectionEl.style.display = 'none';
+        if (sectionEl) sectionEl.style.display = 'none';
+        if (chatWidget) chatWidget.style.display = 'none';
         return;
     }
     
-    const personalTips = allTips.filter(t => t.target_user_id === currentUser.id);
+    // Personal conversation thread = all tips from Avi to this user + all replies from this user to Avi
+    const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
+    
+    // Show/Hide Floating Widget (Bubble appears only if Avi has initiated a personal recommendation/tip)
+    const aviInitiatedTips = personalTips.filter(t => t.recommender === 'avi');
+    if (chatWidget) {
+        if (aviInitiatedTips.length > 0) {
+            chatWidget.style.display = 'flex';
+            if (chatBadge) {
+                // Number of total messages from Avi in the thread
+                chatBadge.textContent = aviInitiatedTips.length.toString();
+            }
+        } else {
+            chatWidget.style.display = 'none';
+        }
+    }
     
     if (countEl) {
-        countEl.textContent = `${personalTips.length} הודעות`;
+        countEl.textContent = `${aviInitiatedTips.length} הודעות`;
     }
     
     if (personalTips.length === 0) {
-        sectionEl.style.display = 'none';
-        listEl.innerHTML = '';
+        if (sectionEl) sectionEl.style.display = 'none';
+        if (listEl) listEl.innerHTML = '';
         return;
     }
     
-    sectionEl.style.display = 'block';
-    listEl.innerHTML = '';
+    // Keep the inline list display updated too!
+    if (sectionEl && listEl) {
+        // Show inline card only if there are recommendations from Avi (not replies)
+        if (aviInitiatedTips.length > 0) {
+            sectionEl.style.display = 'block';
+            listEl.innerHTML = '';
+            
+            const sortedTips = [...aviInitiatedTips].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+            sortedTips.forEach(tip => {
+                const div = document.createElement('div');
+                div.className = 'tip-item';
+                div.style.background = 'rgba(163, 52, 255, 0.04)';
+                div.style.border = '1px solid rgba(163, 52, 255, 0.15)';
+                
+                const dateStr = tip.date || (tip.created_at ? tip.created_at.split('T')[0] : '');
+                const dateTag = dateStr ? `<span style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.4); margin-right: auto; direction: ltr;">${dateStr}</span>` : '';
+                
+                div.innerHTML = `
+                    <div class="tip-icon purple" style="background: rgba(163, 52, 255, 0.1); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a334ff;">
+                        <span class="material-icons-round">campaign</span>
+                    </div>
+                    <div class="tip-content" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; align-items: center; width: 100%;">
+                            <span class="tip-title" style="color: #a334ff; font-weight: 700; font-size: 0.95rem;">הודעה אישית מאבי (יועץ ההשקעות)</span>
+                            ${dateTag}
+                        </div>
+                        <span class="tip-desc" style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;">${tip.content}</span>
+                    </div>
+                `;
+                listEl.appendChild(div);
+            });
+        } else {
+            sectionEl.style.display = 'none';
+        }
+    }
     
-    personalTips.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-    
-    personalTips.forEach(tip => {
-        const div = document.createElement('div');
-        div.className = 'tip-item';
-        div.style.background = 'rgba(163, 52, 255, 0.04)'; // Premium soft purple background to distinguish personal tips!
-        div.style.border = '1px solid rgba(163, 52, 255, 0.15)';
-        
-        const dateStr = tip.date || (tip.created_at ? tip.created_at.split('T')[0] : '');
-        const dateTag = dateStr ? `<span style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.4); margin-right: auto; direction: ltr;">${dateStr}</span>` : '';
-        
-        div.innerHTML = `
-            <div class="tip-icon purple" style="background: rgba(163, 52, 255, 0.1); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a334ff;">
-                <span class="material-icons-round">campaign</span>
-            </div>
-            <div class="tip-content" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
-                <div style="display: flex; align-items: center; width: 100%;">
-                    <span class="tip-title" style="color: #a334ff; font-weight: 700; font-size: 0.95rem;">הודעה אישית מאבי (יועץ ההשקעות)</span>
-                    ${dateTag}
-                </div>
-                <span class="tip-desc" style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;">${tip.content}</span>
-            </div>
-        `;
-        listEl.appendChild(div);
-    });
+    // Render the messages inside the floating chat drawer if it is currently open
+    const chatDrawer = document.getElementById('personal-chat-drawer');
+    if (chatDrawer && chatDrawer.style.right === '0px') {
+        renderPersonalChatMessages();
+    }
 }
 
 function openPersonalTipModal() {
@@ -2782,9 +2831,196 @@ async function handlePersonalTipSubmit(event) {
         
         // טעינה מחדש של נתוני מנהל כדי לסנכרן
         await loadUserData();
+        renderAdminClientChatHistory();
     } catch (e) {
         showToast(e.message || 'שגיאה בשליחת המלצה אישית', 'error');
     } finally {
         if (submitBtn) submitBtn.disabled = false;
     }
+}
+
+/* ==================== 12. מגירת שיחה אישית ללקוח ומענה לאבי ==================== */
+
+function openPersonalChatDrawer() {
+    const drawer = document.getElementById('personal-chat-drawer');
+    if (drawer) {
+        drawer.style.right = '0px';
+        renderPersonalChatMessages();
+    }
+}
+
+function closePersonalChatDrawer() {
+    const drawer = document.getElementById('personal-chat-drawer');
+    if (drawer) {
+        drawer.style.right = '-420px';
+    }
+}
+
+function renderPersonalChatMessages() {
+    const container = document.getElementById('personal-chat-messages-container');
+    if (!container || !currentUser) return;
+    
+    container.innerHTML = '';
+    
+    // Personal conversation thread = Avi tips to this user + client replies
+    const thread = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
+    
+    // Sort chronologically
+    thread.sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
+    
+    if (thread.length === 0) {
+        container.innerHTML = '<p class="text-muted" style="text-align: center; font-size: 0.85rem;">אין היסטוריית הודעות.</p>';
+        return;
+    }
+    
+    thread.forEach(msg => {
+        const div = document.createElement('div');
+        const isClient = msg.recommender === 'client';
+        
+        div.style.display = 'flex';
+        div.style.flexDirection = 'column';
+        div.style.maxWidth = '75%';
+        div.style.padding = '10px 14px';
+        div.style.borderRadius = 'var(--radius-md)';
+        div.style.fontSize = '0.9rem';
+        div.style.lineHeight = '1.4';
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.marginBottom = '6px';
+        
+        if (isClient) {
+            // Client bubble aligned left/right accordingly
+            div.style.alignSelf = 'flex-start';
+            div.style.background = 'rgba(255, 255, 255, 0.05)';
+            div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+            div.style.color = 'var(--text-primary)';
+            div.style.borderRadius = '16px 16px 16px 2px';
+        } else {
+            // Advisor bubble
+            div.style.alignSelf = 'flex-end';
+            div.style.background = 'rgba(163, 52, 255, 0.15)';
+            div.style.border = '1px solid rgba(163, 52, 255, 0.3)';
+            div.style.color = '#e2beff';
+            div.style.borderRadius = '16px 16px 2px 16px';
+        }
+        
+        const timeStr = msg.date || '';
+        const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: ${isClient ? 'flex-end' : 'flex-start'};">${timeStr}</span>` : '';
+        
+        div.innerHTML = `
+            <span>${msg.content}</span>
+            ${timeSpan}
+        `;
+        container.appendChild(div);
+    });
+    
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
+}
+
+async function handlePersonalChatSubmit(event) {
+    event.preventDefault();
+    const input = document.getElementById('personal-chat-input');
+    if (!input || !input.value.trim() || !currentUser) return;
+    
+    const content = input.value.trim();
+    input.value = '';
+    
+    try {
+        await API.request('POST', '/api/tips', {
+            content,
+            ticker: null,
+            target_user_id: currentUser.id,
+            recommender: 'client'
+        });
+        
+        // Reload all data (which will call renderPersonalTips and refresh the messages)
+        await loadUserData();
+    } catch (e) {
+        showToast(e.message || 'שגיאה בשליחת הודעה', 'error');
+    }
+}
+
+/* ==================== 13. שיחת התקשרות אישית בצד יועץ מנהל = style chat ==================== */
+
+async function handleAdminChatSubmit(event) {
+    event.preventDefault();
+    const input = document.getElementById('admin-client-chat-input');
+    if (!input || !input.value.trim() || !activeViewingClientId) return;
+    
+    const content = input.value.trim();
+    input.value = '';
+    
+    try {
+        await API.createTip(null, content, 'avi', activeViewingClientId);
+        showToast('הודעה אישית נשלחה ללקוח בהצלחה!', 'success');
+        
+        // Reload
+        await loadUserData();
+        renderAdminClientChatHistory();
+    } catch (e) {
+        showToast(e.message || 'שגיאה בשליחת הודעה', 'error');
+    }
+}
+
+function renderAdminClientChatHistory() {
+    const container = document.getElementById('admin-client-chat-container');
+    if (!container || !activeViewingClientId) return;
+    
+    container.innerHTML = '';
+    
+    // Conversation thread for this specific viewed client
+    const thread = allTips.filter(t => t.target_user_id === activeViewingClientId && (t.recommender === 'avi' || t.recommender === 'client'));
+    
+    // Sort chronologically
+    thread.sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
+    
+    if (thread.length === 0) {
+        container.innerHTML = '<p class="text-muted" style="text-align: center; font-size: 0.85rem; padding: 20px 0;">אין היסטוריית הודעות עם לקוח זה. תוכל להתחיל את השיחה על ידי שליחת הודעה מטה!</p>';
+        return;
+    }
+    
+    thread.forEach(msg => {
+        const div = document.createElement('div');
+        const isClient = msg.recommender === 'client';
+        
+        div.style.display = 'flex';
+        div.style.flexDirection = 'column';
+        div.style.maxWidth = '75%';
+        div.style.padding = '10px 14px';
+        div.style.borderRadius = 'var(--radius-md)';
+        div.style.fontSize = '0.9rem';
+        div.style.lineHeight = '1.4';
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.marginBottom = '6px';
+        
+        if (isClient) {
+            // Client bubble (on the left for Admin view)
+            div.style.alignSelf = 'flex-start';
+            div.style.background = 'rgba(255, 255, 255, 0.05)';
+            div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+            div.style.color = 'var(--text-primary)';
+            div.style.borderRadius = '16px 16px 16px 2px';
+        } else {
+            // Admin bubble (on the right for Admin view)
+            div.style.alignSelf = 'flex-end';
+            div.style.background = 'rgba(163, 52, 255, 0.15)';
+            div.style.border = '1px solid rgba(163, 52, 255, 0.3)';
+            div.style.color = '#e2beff';
+            div.style.borderRadius = '16px 16px 2px 16px';
+        }
+        
+        const senderName = isClient ? 'הלקוח' : 'אני';
+        const timeStr = msg.date || '';
+        const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: ${isClient ? 'flex-end' : 'flex-start'};">${timeStr}</span>` : '';
+        
+        div.innerHTML = `
+            <strong style="font-size: 0.72rem; color: ${isClient ? 'var(--accent-blue-start)' : '#a334ff'}; margin-bottom: 2px;">${senderName}:</strong>
+            <span>${msg.content}</span>
+            ${timeSpan}
+        `;
+        container.appendChild(div);
+    });
+    
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
 }
