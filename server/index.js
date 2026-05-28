@@ -25,16 +25,42 @@ function uid(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function syncPortfoliosCashBalances(db) {
+  for (const p of db.portfolios) {
+    let balance = 0;
+    const pTx = db.transactions.filter(t => t.portfolio_id === p.id);
+    for (const t of pTx) {
+      if (t.action_type === 'deposit') {
+        balance += parseFloat(t.price || 0);
+      } else if (t.action_type === 'withdraw') {
+        balance -= parseFloat(t.price || 0);
+      } else if (t.action_type === 'buy') {
+        balance -= parseFloat(t.quantity || 0) * parseFloat(t.price || 0);
+      } else if (t.action_type === 'sell') {
+        balance += parseFloat(t.quantity || 0) * parseFloat(t.price || 0);
+      }
+    }
+    p.cash_balance = balance;
+  }
+}
+
 function readDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DB_FILE)) {
-    const db = { users: [], portfolios: [], transactions: [], tips: [] };
+    const db = { users: [], portfolios: [], transactions: [], tips: [], notifications: [], subscriptions: [] };
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
     seedDb(db);
     return db;
   }
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   if (db.users.length === 0) seedDb(db);
+  
+  if (!db.notifications) db.notifications = [];
+  if (!db.subscriptions) db.subscriptions = [];
+  
+  // Recalculate and synchronize cash balances dynamically
+  syncPortfoliosCashBalances(db);
+  
   return db;
 }
 
@@ -286,8 +312,21 @@ async function generateDailyAITips(db) {
 
   // Add all to database
   db.tips.push(...tipsToCreate);
+  
+  // Trigger AI Daily Tip Push Notification
+  const newNotif = {
+    id: uid('nt'),
+    user_id: null, // Broadcast to all subscribed users!
+    title: 'PortfolioPulse AI: ניתוח שוק חדש',
+    body: 'הבוט שלנו סרק את השוק והעלה תובנות חדשות להיום. היכנסו לראות.',
+    created_at: new Date().toISOString(),
+    read_by: []
+  };
+  db.notifications = db.notifications || [];
+  db.notifications.push(newNotif);
+
   writeDb(db);
-  console.log(`[AI Tips Generator] Successfully created 3 daily tips for ${today}.`);
+  console.log(`[AI Tips Generator] Successfully created 3 daily tips and broadcast notification for ${today}.`);
 }
 
 function serveStatic(req, res, filePath) {
@@ -402,16 +441,52 @@ async function handleApi(req, res, pathname, query) {
     const portfolio = db.portfolios.find(p => p.id === body.portfolio_id);
     if (!portfolio) return sendJson(res, 404, { error: 'תיק לא נמצא' });
     if (user.role === 'client' && portfolio.user_id !== user.id) return sendJson(res, 403, { error: 'אין הרשאה לתיק זה' });
+    
+    const actionType = body.action_type;
+    const price = parseFloat(body.price || 0);
+    const qty = parseFloat(body.quantity || 0);
+    
+    // Strict Cash Validation & Deduction for BUY
+    if (actionType === 'buy') {
+      const totalCost = qty * price;
+      if ((portfolio.cash_balance || 0) < totalCost) {
+        return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו' });
+      }
+      portfolio.cash_balance = (portfolio.cash_balance || 0) - totalCost;
+    }
+    
+    // Strict Cash Validation & Deduction for WITHDRAW
+    else if (actionType === 'withdraw') {
+      if ((portfolio.cash_balance || 0) < price) {
+        return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו' });
+      }
+      portfolio.cash_balance = (portfolio.cash_balance || 0) - price;
+    }
+    
+    // Add cash on DEPOSIT
+    else if (actionType === 'deposit') {
+      portfolio.cash_balance = (portfolio.cash_balance || 0) + price;
+    }
+    
+    // Add cash on SELL
+    else if (actionType === 'sell') {
+      const totalGain = qty * price;
+      portfolio.cash_balance = (portfolio.cash_balance || 0) + totalGain;
+    }
+    
+    // For actionType === 'holding', it does not affect cash balance (tracking only).
+    
     const tx = {
       id: uid('tx'),
       portfolio_id: body.portfolio_id,
       ticker: body.ticker || null,
-      action_type: body.action_type,
-      quantity: body.quantity || 0,
-      price: body.price,
+      action_type: actionType,
+      quantity: qty,
+      price: price,
       transaction_date: body.transaction_date || new Date().toISOString(),
       created_by_user_id: user.id
     };
+    
     db.transactions.push(tx);
     writeDb(db);
     return sendJson(res, 201, { transaction: tx });
@@ -421,7 +496,15 @@ async function handleApi(req, res, pathname, query) {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const db = readDb();
     await generateDailyAITips(db);
-    const tips = db.tips.map(t => ({ id: t.id, advisor_id: t.advisor_id, recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), ticker: t.ticker, content: t.content, date: t.date || t.created_at?.split('T')[0] }));
+    const tips = db.tips.map(t => ({ 
+      id: t.id, 
+      advisor_id: t.advisor_id, 
+      recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), 
+      ticker: t.ticker, 
+      content: t.content, 
+      target_user_id: t.target_user_id || null,
+      date: t.date || t.created_at?.split('T')[0] 
+    }));
     return sendJson(res, 200, { tips });
   }
 
@@ -431,15 +514,41 @@ async function handleApi(req, res, pathname, query) {
     const body = await readBody(req);
     if (!body.content?.trim()) return sendJson(res, 400, { error: 'נא להזין תוכן להמלצה' });
     const db = readDb();
+    
+    const targetUserId = body.target_user_id || null;
     const tip = {
       id: uid('t'),
       advisor_id: user.id,
       recommender: body.recommender || 'avi',
       ticker: body.ticker ? body.ticker.toUpperCase() : null,
       content: body.content.trim(),
+      target_user_id: targetUserId,
       date: new Date().toISOString().split('T')[0]
     };
     db.tips.push(tip);
+
+    // Trigger push notification by category
+    let notifTitle = '';
+    let notifBody = '';
+    if (targetUserId) {
+      notifTitle = 'הודעה אישית מאבי';
+      notifBody = 'התקבלה המלצה חדשה המותאמת אישית לתיק ההשקעות שלך. לחץ לצפייה.';
+    } else {
+      notifTitle = 'עדכון חדש בקהילה';
+      notifBody = 'התקבלה המלצה חדשה בקהילת ההשקעות';
+    }
+
+    const newNotif = {
+      id: uid('nt'),
+      user_id: targetUserId,
+      title: notifTitle,
+      body: notifBody,
+      created_at: new Date().toISOString(),
+      read_by: []
+    };
+    db.notifications = db.notifications || [];
+    db.notifications.push(newNotif);
+
     writeDb(db);
     return sendJson(res, 201, { tip });
   }
@@ -497,6 +606,47 @@ async function handleApi(req, res, pathname, query) {
     } catch (e) {
       return sendJson(res, 502, { error: e.message, quotes: [] });
     }
+  }
+
+  if (pathname === '/api/notifications/subscribe' && req.method === 'POST') {
+    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
+    const body = await readBody(req);
+    const db = readDb();
+    db.subscriptions = db.subscriptions || [];
+    
+    const idx = db.subscriptions.findIndex(s => s.user_id === user.id && s.endpoint === body.endpoint);
+    if (idx === -1) {
+      db.subscriptions.push({
+        id: uid('sub'),
+        user_id: user.id,
+        endpoint: body.endpoint,
+        subscription: body,
+        created_at: new Date().toISOString()
+      });
+      writeDb(db);
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (pathname === '/api/notifications/poll' && req.method === 'GET') {
+    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
+    const db = readDb();
+    db.notifications = db.notifications || [];
+    
+    const pending = db.notifications.filter(n => {
+      const isTargeted = n.user_id === user.id || n.user_id === null;
+      const isRead = n.read_by.includes(user.id);
+      return isTargeted && !isRead;
+    });
+    
+    for (const n of pending) {
+      n.read_by.push(user.id);
+    }
+    
+    if (pending.length > 0) {
+      writeDb(db);
+    }
+    return sendJson(res, 200, { notifications: pending });
   }
 
   return sendJson(res, 404, { error: 'Not found' });

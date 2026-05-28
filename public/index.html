@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <!-- Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="styles.css?v=2.1.0">
+    <link rel="stylesheet" href="styles.css?v=2.2.0">
     
     <!-- PWA Setup & iOS Mobile Standalone Support -->
     <link rel="manifest" href="manifest.json">
@@ -127,6 +127,44 @@
                         <span class="material-icons-round" style="font-size: 14px;">android</span>
                         <span>אנדרואיד (APK)</span>
                     </a>
+                </div>
+                <!-- מתג התראות דחיפה פרימיום -->
+                <div class="push-notification-settings" style="margin-bottom: 12px; padding: 8px 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="material-icons-round" style="font-size: 16px; color: var(--accent-blue-start);">notifications_active</span>
+                            <span style="font-size: 0.72rem; color: var(--text-secondary);">התראות דחיפה בנייד:</span>
+                        </div>
+                        <label class="switch" style="position: relative; display: inline-block; width: 36px; height: 20px;">
+                            <input type="checkbox" id="push-toggle-sidebar" onchange="togglePushSubscription(event)" style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 20px;"></span>
+                        </label>
+                    </div>
+                    
+                    <!-- Fine-grained Preferences (Expanded when enabled) -->
+                    <div id="push-preferences-sidebar" style="display: none; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); width: 100%;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                            <span style="font-size: 0.65rem; color: var(--text-secondary);">ניתוחי AI יומיים:</span>
+                            <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                <input type="checkbox" id="push-opt-ai-sidebar" checked onchange="updatePushPreference('ai', this.checked)">
+                                <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                            </label>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                            <span style="font-size: 0.65rem; color: var(--text-secondary);">המלצות קהילה:</span>
+                            <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                <input type="checkbox" id="push-opt-community-sidebar" checked onchange="updatePushPreference('community', this.checked)">
+                                <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                            </label>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                            <span style="font-size: 0.65rem; color: var(--text-secondary);">התראות יועץ אישיות:</span>
+                            <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                <input type="checkbox" id="push-opt-personal-sidebar" checked onchange="updatePushPreference('personal', this.checked)">
+                                <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 <button class="btn btn-danger btn-block" onclick="handleLogout()">
                     <span class="material-icons-round">logout</span>
@@ -247,6 +285,20 @@
                                     <p>אין נתוני מניות להצגה. בצע עסקה ראשונה כדי לראות את התפלגות התיק.</p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- טיפים אישיים ממנהל התיק -->
+                    <div class="visual-card full-width" id="personal-tips-section" style="margin-top: 24px; display: none;">
+                        <div class="card-header flex-between" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 12px; margin-bottom: 16px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="material-icons-round" style="color: var(--accent-purple-start); font-size: 24px;">campaign</span>
+                                <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700;">טיפים אישיים ממנהל התיק</h3>
+                            </div>
+                            <span class="badge badge-outline" id="personal-tips-count">0 הודעות</span>
+                        </div>
+                        <div id="personal-tips-list" class="personal-tips-container" style="display: flex; flex-direction: column; gap: 12px;">
+                            <!-- יוזן דינמית -->
                         </div>
                     </div>
                 </div>
@@ -411,6 +463,10 @@
                             <span class="material-icons-round">visibility</span>
                             <span>מצב צפייה בתיק לקוח: <strong id="detail-client-name">—</strong></span>
                         </div>
+                        <button class="btn btn-success" onclick="openPersonalTipModal()" style="margin-right: auto; margin-left: 0;">
+                            <span class="material-icons-round">campaign</span>
+                            <span>שליחת טיפ אישי</span>
+                        </button>
                     </div>
 
                     <!-- מדדי הלקוח הספציפי -->
@@ -608,6 +664,44 @@
                         <!-- ימולא דינמית על ידי JS בהתאם ל-role -->
                     </nav>
                     <div class="mobile-drawer-footer" style="margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05);">
+                        <!-- מתג התראות דחיפה פרימיום מובייל -->
+                        <div class="push-notification-settings" style="margin-bottom: 12px; padding: 8px 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span class="material-icons-round" style="font-size: 16px; color: var(--accent-blue-start);">notifications_active</span>
+                                    <span style="font-size: 0.72rem; color: var(--text-secondary);">התראות דחיפה בנייד:</span>
+                                </div>
+                                <label class="switch" style="position: relative; display: inline-block; width: 36px; height: 20px;">
+                                    <input type="checkbox" id="push-toggle-mobile" onchange="togglePushSubscription(event)" style="opacity: 0; width: 0; height: 0;">
+                                    <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 20px;"></span>
+                                </label>
+                            </div>
+                            
+                            <!-- Fine-grained Preferences (Expanded when enabled) -->
+                            <div id="push-preferences-mobile" style="display: none; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); width: 100%;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">ניתוחי AI יומיים:</span>
+                                    <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                        <input type="checkbox" id="push-opt-ai-mobile" checked onchange="updatePushPreference('ai', this.checked)">
+                                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                                    </label>
+                                </div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">המלצות קהילה:</span>
+                                    <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                        <input type="checkbox" id="push-opt-community-mobile" checked onchange="updatePushPreference('community', this.checked)">
+                                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                                    </label>
+                                </div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">התראות יועץ אישיות:</span>
+                                    <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
+                                        <input type="checkbox" id="push-opt-personal-mobile" checked onchange="updatePushPreference('personal', this.checked)">
+                                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.1); transition: .4s; border-radius: 16px;"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
                         <button class="btn btn-danger btn-block" onclick="handleLogout(); closeMobileDrawer();" style="padding: 8px 16px; font-size: 0.85rem; border-radius: var(--radius-md);">
                             <span class="material-icons-round">logout</span>
                             <span>התנתק</span>
@@ -713,11 +807,54 @@
         </div>
     </div>
 
+    <!-- מודל שליחת טיפ אישי ללקוח (Personal Tip Modal) -->
+    <div id="personal-tip-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>שליחת טיפ / המלצה אישית ללקוח</h3>
+                <button class="modal-close-btn" onclick="closePersonalTipModal()">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            
+            <form id="personal-tip-form" onsubmit="handlePersonalTipSubmit(event)">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>לקוח יעד:</label>
+                    <div class="viewing-badge" style="width: 100%; display: flex; align-items: center; gap: 8px; justify-content: flex-start; padding: 10px; background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06);">
+                        <span class="material-icons-round" style="color: var(--accent-blue-start);">person</span>
+                        <span id="personal-tip-client-name" style="font-weight: 700;">—</span>
+                    </div>
+                </div>
+
+                <div class="form-group" id="personal-tip-ticker-group" style="position: relative; margin-bottom: 16px;">
+                    <label for="pt-ticker">סימול מניה מומלצת (אופציונלי)</label>
+                    <div class="input-wrapper">
+                        <span class="material-icons-round input-icon">search</span>
+                        <input type="text" id="pt-ticker" placeholder="למשל: AAPL, TSLA (השאר ריק לטיפ כללי)" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="pt-content">תוכן ההמלצה האישית</label>
+                    <div class="input-wrapper" style="align-items: flex-start;">
+                        <span class="material-icons-round input-icon" style="top: 14px;">description</span>
+                        <textarea id="pt-content" rows="5" placeholder="כתוב המלצה ממוקדת המתאימה לתיק של לקוח זה..." required style="width:100%; padding: 12px 42px 12px 16px; background: rgba(15, 20, 30, 0.8); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.95rem; resize: vertical; min-height: 100px;"></textarea>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closePersonalTipModal()">ביטול</button>
+                    <button type="submit" class="btn btn-primary" id="pt-submit-btn">שלח טיפ אישי</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- הודעות התראה קופצות (Toasts) -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="calculations.js?v=2.1.0"></script>
-    <script src="api.js?v=2.1.0"></script>
-    <script src="app.js?v=2.1.0"></script>
+    <script src="calculations.js?v=2.2.0"></script>
+    <script src="api.js?v=2.2.0"></script>
+    <script src="app.js?v=2.2.0"></script>
 </body>
 </html>

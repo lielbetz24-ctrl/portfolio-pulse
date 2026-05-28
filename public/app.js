@@ -101,6 +101,8 @@ document.addEventListener("DOMContentLoaded", () => {
 // ==================== 1.1 אינטגרציה עם API לנתוני שוק חיים (Yahoo Finance via CORS Proxy) ====================
 let isLiveSyncing = false;
 let lastSyncTime = null;
+let isInitialPricesLoaded = false;
+let activeViewingClientId = null;
 
 // פונקציית עזר המבצעת Fetch בעלת מנגנון נפילה רכה (Fallback) בין מספר שרתי פרוקסי CORS פומביים ויציבים!
 async function fetchWithCORS(targetUrl) {
@@ -180,7 +182,34 @@ async function fetchLivePrices() {
     // הוספה תמיד של שער החליפין דולר/שקל לרשימת הסנכרון
     uniqueTickersSet.add('ILS=X');
     
-    const tickersList = Array.from(uniqueTickersSet);
+    // סינון מניות פעילות לפי אזורי זמן מסחר (אלא אם כן זו טעינה ראשונית)
+    const activeTickers = [];
+    uniqueTickersSet.forEach(ticker => {
+        if (ticker === 'ILS=X') {
+            activeTickers.push(ticker);
+        } else if (!isInitialPricesLoaded || PortfolioEngine.isAssetMarketOpen(ticker)) {
+            activeTickers.push(ticker);
+        }
+    });
+    
+    // אם כל השווקים הרלוונטיים סגורים והמחירים הראשוניים כבר נטענו — נקפיא את העדכון ונציג חיווי מתאים
+    const hasOnlyILS = activeTickers.length === 1 && activeTickers[0] === 'ILS=X';
+    if (hasOnlyILS && isInitialPricesLoaded) {
+        if (syncIcon) syncIcon.style.animation = 'none';
+        if (syncStatusText) {
+            syncStatusText.textContent = 'שוק סגור (נעילה) | השערים מוקפאים';
+        }
+        if (syncBadge) {
+            syncBadge.style.background = 'rgba(255, 193, 7, 0.08)'; // צהוב אזהרה יוקרתי
+            syncBadge.style.color = 'var(--warning-gold)';
+            syncBadge.style.borderColor = 'rgba(255, 193, 7, 0.2)';
+        }
+        // נריץ בכל זאת פולינג להתראות דחיפה ברקע
+        pollNotifications();
+        return;
+    }
+    
+    const tickersList = activeTickers;
     if (tickersList.length === 0) return;
     
     isLiveSyncing = true;
@@ -229,6 +258,8 @@ async function fetchLivePrices() {
         
         lastSyncTime = new Date();
         isLiveSyncing = false;
+        isInitialPricesLoaded = true;
+        pollNotifications();
         
         // עדכון חזותי להצלחה
         if (syncIcon) syncIcon.style.animation = 'none';
@@ -274,6 +305,9 @@ function initLivePricePolling() {
     
     // מרווח פולינג קבוע - עדכון שערים בכל 60 שניות כדי לא להעמיס על הפרוקסי
     setInterval(fetchLivePrices, 60000);
+    
+    // פולינג קבוע להתראות בכל 30 שניות
+    setInterval(pollNotifications, 30000);
 }
 
 function initLocalCache() {
@@ -321,6 +355,7 @@ async function setupAppForUser() {
 
     renderSidebarNavigation();
     await loadUserData();
+    restoreNotificationSettings();
 
     if (currentUser.role === 'admin') {
         switchView('admin-dashboard');
@@ -438,6 +473,7 @@ async function loadUserData() {
 
         if (currentUser.role === 'client') {
             refreshCalculations();
+            renderPersonalTips();
         } else {
             refreshAdminCalculations();
         }
@@ -1513,6 +1549,17 @@ async function handleTransactionSubmit(event) {
             showToast(`אין ברשותך מספיק מניות! כמות זמינה: ${availableQty} מניות של ${ticker}`, 'error');
             return;
         }
+    } else if (actionType === 'buy') {
+        const totalCost = qty * price;
+        if (metrics.cash_balance < totalCost) {
+            showToast(`אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו. יתרה זמינה: ${formatCurrency(metrics.cash_balance)} | עלות עסקה: ${formatCurrency(totalCost)}`, 'error');
+            return;
+        }
+    } else if (actionType === 'withdraw') {
+        if (metrics.cash_balance < price) {
+            showToast(`אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו. יתרה זמינה: ${formatCurrency(metrics.cash_balance)} | סכום משיכה: ${formatCurrency(price)}`, 'error');
+            return;
+        }
     }
 
     try {
@@ -2096,6 +2143,7 @@ function refreshAdminCalculations() {
 
 // ב. מסך צפייה בתיק לקוח ספציפי (Client Portfolio Viewer)
 function viewClientPortfolio(clientId) {
+    activeViewingClientId = clientId;
     const client = allUsers.find(u => u.id === clientId);
     const portfolio = portfolios.find(p => p.user_id === clientId);
 
@@ -2456,4 +2504,287 @@ function showToast(message, type = 'info') {
         toast.style.animation = 'toastSlideIn 0.3s ease reverse forwards';
         setTimeout(() => toast.remove(), 300);
     }, 4500);
+}
+
+/* ==================== 10. התראות דחיפה פרימיום & טיפים אישיים ==================== */
+
+function restoreNotificationSettings() {
+    const mainEnabled = localStorage.getItem('push_notifications_enabled') === 'true';
+    
+    // Sync main toggles
+    const sidebarToggle = document.getElementById('push-toggle-sidebar');
+    const mobileToggle = document.getElementById('push-toggle-mobile');
+    if (sidebarToggle) sidebarToggle.checked = mainEnabled;
+    if (mobileToggle) mobileToggle.checked = mainEnabled;
+
+    const sidebarPrefs = document.getElementById('push-preferences-sidebar');
+    const mobilePrefs = document.getElementById('push-preferences-mobile');
+
+    if (mainEnabled) {
+        if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
+        if (mobilePrefs) mobilePrefs.style.display = 'flex';
+        syncPushPreferenceCheckboxes();
+    } else {
+        if (sidebarPrefs) sidebarPrefs.style.display = 'none';
+        if (mobilePrefs) mobilePrefs.style.display = 'none';
+    }
+}
+
+function syncPushPreferenceCheckboxes() {
+    const categories = ['ai', 'community', 'personal'];
+    categories.forEach(cat => {
+        const isEnabled = localStorage.getItem(`push_${cat}_enabled`) !== 'false'; // defaults to true
+        const sidebarOpt = document.getElementById(`push-opt-${cat}-sidebar`);
+        const mobileOpt = document.getElementById(`push-opt-${cat}-mobile`);
+        if (sidebarOpt) sidebarOpt.checked = isEnabled;
+        if (mobileOpt) mobileOpt.checked = isEnabled;
+    });
+}
+
+function togglePushSubscription(event) {
+    const isEnabled = event.target.checked;
+    
+    // Sync both switches (sidebar and mobile drawer)
+    const sidebarToggle = document.getElementById('push-toggle-sidebar');
+    const mobileToggle = document.getElementById('push-toggle-mobile');
+    if (sidebarToggle) sidebarToggle.checked = isEnabled;
+    if (mobileToggle) mobileToggle.checked = isEnabled;
+
+    const sidebarPrefs = document.getElementById('push-preferences-sidebar');
+    const mobilePrefs = document.getElementById('push-preferences-mobile');
+
+    if (isEnabled) {
+        // Request browser permission
+        if ('Notification' in window) {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    showToast('התראות דחיפה הופעלו בהצלחה בדפדפן!', 'success');
+                    localStorage.setItem('push_notifications_enabled', 'true');
+                    
+                    // Default categories if not set
+                    if (localStorage.getItem('push_ai_enabled') === null) localStorage.setItem('push_ai_enabled', 'true');
+                    if (localStorage.getItem('push_community_enabled') === null) localStorage.setItem('push_community_enabled', 'true');
+                    if (localStorage.getItem('push_personal_enabled') === null) localStorage.setItem('push_personal_enabled', 'true');
+
+                    // Show fine-grained preferences
+                    if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
+                    if (mobilePrefs) mobilePrefs.style.display = 'flex';
+                    
+                    // Sync fine-grained checkboxes with localStorage values
+                    syncPushPreferenceCheckboxes();
+                    
+                    // Register subscription on backend
+                    const endpoint = 'mock-endpoint-' + currentUser.id;
+                    API.request('POST', '/api/notifications/subscribe', {
+                        endpoint: endpoint,
+                        keys: { p256dh: 'mock-p256dh', auth: 'mock-auth' }
+                    }).catch(err => console.error('Subscription sync failed:', err));
+                } else {
+                    showToast('הרשאת התראות נדחתה על ידי הדפדפן.', 'error');
+                    if (sidebarToggle) sidebarToggle.checked = false;
+                    if (mobileToggle) mobileToggle.checked = false;
+                    localStorage.setItem('push_notifications_enabled', 'false');
+                    if (sidebarPrefs) sidebarPrefs.style.display = 'none';
+                    if (mobilePrefs) mobilePrefs.style.display = 'none';
+                }
+            });
+        }
+    } else {
+        localStorage.setItem('push_notifications_enabled', 'false');
+        if (sidebarPrefs) sidebarPrefs.style.display = 'none';
+        if (mobilePrefs) mobilePrefs.style.display = 'none';
+        showToast('התראות דחיפה כובו.', 'info');
+    }
+}
+
+function updatePushPreference(category, isChecked) {
+    localStorage.setItem(`push_${category}_enabled`, isChecked ? 'true' : 'false');
+    // Sync sidebar and mobile checkboxes for the category
+    const sidebarOpt = document.getElementById(`push-opt-${category}-sidebar`);
+    const mobileOpt = document.getElementById(`push-opt-${category}-mobile`);
+    if (sidebarOpt) sidebarOpt.checked = isChecked;
+    if (mobileOpt) mobileOpt.checked = isChecked;
+    showToast('העדפות ההתראה עודכנו בהצלחה.', 'success');
+}
+
+async function pollNotifications() {
+    if (!currentUser) return;
+    
+    // Check if main notifications are enabled
+    const mainEnabled = localStorage.getItem('push_notifications_enabled') === 'true';
+    if (!mainEnabled) return;
+
+    // Check if specific categories are enabled (default to true if null)
+    const isTipsEnabled = localStorage.getItem('push_ai_enabled') !== 'false';
+    const isCommunityEnabled = localStorage.getItem('push_community_enabled') !== 'false';
+    const isPersonalEnabled = localStorage.getItem('push_personal_enabled') !== 'false';
+
+    try {
+        const data = await API.request('GET', '/api/notifications/poll');
+        if (data && data.notifications && data.notifications.length > 0) {
+            let receivedAny = false;
+            
+            for (const notif of data.notifications) {
+                // Determine category
+                const isAiTip = notif.title.includes('AI') || notif.title.includes('ניתוח');
+                const isCommunity = notif.title.includes('קהילה') || notif.title.includes('קהילת');
+                const isPersonal = notif.title.includes('אישית') || notif.title.includes('אבי');
+                
+                if (isAiTip && !isTipsEnabled) continue;
+                if (isCommunity && !isCommunityEnabled) continue;
+                if (isPersonal && !isPersonalEnabled) continue;
+
+                receivedAny = true;
+
+                // Show native browser notification if permission is granted
+                if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+                    const reg = await navigator.serviceWorker.ready;
+                    reg.showNotification(notif.title, {
+                        body: notif.body,
+                        icon: '/favicon.ico',
+                        badge: '/favicon.ico',
+                        vibrate: [100, 50, 100],
+                        data: { url: '/' }
+                    });
+                } else {
+                    // Fallback to app toast
+                    showToast(`<strong>${notif.title}</strong><br>${notif.body}`, 'info');
+                }
+            }
+            
+            // Reload user data since new tips/recommendations might have arrived
+            if (receivedAny) {
+                await loadUserData();
+            }
+        }
+    } catch (e) {
+        console.error('Error polling notifications:', e);
+    }
+}
+
+/* ==================== 11. ניהול טיפים אישיים לקוח ומודל מנהל ==================== */
+
+function renderPersonalTips() {
+    const sectionEl = document.getElementById('personal-tips-section');
+    const listEl = document.getElementById('personal-tips-list');
+    const countEl = document.getElementById('personal-tips-count');
+    
+    if (!sectionEl || !listEl) return;
+    
+    if (!currentUser || currentUser.role !== 'client') {
+        sectionEl.style.display = 'none';
+        return;
+    }
+    
+    const personalTips = allTips.filter(t => t.target_user_id === currentUser.id);
+    
+    if (countEl) {
+        countEl.textContent = `${personalTips.length} הודעות`;
+    }
+    
+    if (personalTips.length === 0) {
+        sectionEl.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+    }
+    
+    sectionEl.style.display = 'block';
+    listEl.innerHTML = '';
+    
+    personalTips.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+    
+    personalTips.forEach(tip => {
+        const div = document.createElement('div');
+        div.className = 'tip-item';
+        div.style.background = 'rgba(163, 52, 255, 0.04)'; // Premium soft purple background to distinguish personal tips!
+        div.style.border = '1px solid rgba(163, 52, 255, 0.15)';
+        
+        const dateStr = tip.date || (tip.created_at ? tip.created_at.split('T')[0] : '');
+        const dateTag = dateStr ? `<span style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.4); margin-right: auto; direction: ltr;">${dateStr}</span>` : '';
+        
+        div.innerHTML = `
+            <div class="tip-icon purple" style="background: rgba(163, 52, 255, 0.1); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a334ff;">
+                <span class="material-icons-round">campaign</span>
+            </div>
+            <div class="tip-content" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                <div style="display: flex; align-items: center; width: 100%;">
+                    <span class="tip-title" style="color: #a334ff; font-weight: 700; font-size: 0.95rem;">הודעה אישית מאבי (יועץ ההשקעות)</span>
+                    ${dateTag}
+                </div>
+                <span class="tip-desc" style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;">${tip.content}</span>
+            </div>
+        `;
+        listEl.appendChild(div);
+    });
+}
+
+function openPersonalTipModal() {
+    if (!activeViewingClientId) {
+        showToast('נא לבחור לקוח תחילה', 'error');
+        return;
+    }
+    const client = allUsers.find(u => u.id === activeViewingClientId);
+    if (!client) {
+        showToast('משתמש יעד לא נמצא', 'error');
+        return;
+    }
+    
+    // עדכון שם הלקוח במודל
+    const clientNameEl = document.getElementById('personal-tip-client-name');
+    if (clientNameEl) {
+        clientNameEl.textContent = client.name;
+    }
+    
+    // ניקוי שדות המודל
+    const tickerInput = document.getElementById('pt-ticker');
+    const contentInput = document.getElementById('pt-content');
+    if (tickerInput) tickerInput.value = '';
+    if (contentInput) contentInput.value = '';
+    
+    // הצגת המודל
+    const modal = document.getElementById('personal-tip-modal');
+    if (modal) {
+        modal.classList.add('active');
+    }
+}
+
+function closePersonalTipModal() {
+    const modal = document.getElementById('personal-tip-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function handlePersonalTipSubmit(event) {
+    event.preventDefault();
+    
+    if (!activeViewingClientId) {
+        showToast('שגיאה: משתמש יעד לא נבחר', 'error');
+        return;
+    }
+    
+    const ticker = document.getElementById('pt-ticker').value.trim().toUpperCase();
+    const content = document.getElementById('pt-content').value.trim();
+    const submitBtn = document.getElementById('pt-submit-btn');
+    
+    if (!content) {
+        showToast('נא להזין תוכן להמלצה', 'error');
+        return;
+    }
+    
+    if (submitBtn) submitBtn.disabled = true;
+    
+    try {
+        await API.createTip(ticker || null, content, 'avi', activeViewingClientId);
+        
+        showToast('המלצה אישית נשלחה ללקוח בהצלחה!', 'success');
+        closePersonalTipModal();
+        
+        // טעינה מחדש של נתוני מנהל כדי לסנכרן
+        await loadUserData();
+    } catch (e) {
+        showToast(e.message || 'שגיאה בשליחת המלצה אישית', 'error');
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
 }
