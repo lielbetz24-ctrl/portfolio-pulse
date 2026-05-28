@@ -72,11 +72,15 @@ document.addEventListener("DOMContentLoaded", () => {
     initLivePricePolling();
     checkSession();
 
-    // Register Service Worker for PWA
+    // Register Service Worker for PWA with aggressive update checking
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('/sw.js')
-                .then(reg => console.log('Service Worker registered successfully:', reg.scope))
+                .then(reg => {
+                    console.log('Service Worker registered successfully:', reg.scope);
+                    // Force the browser to check for updates on every page load
+                    reg.update();
+                })
                 .catch(err => console.error('Service Worker registration failed:', err));
         });
     }

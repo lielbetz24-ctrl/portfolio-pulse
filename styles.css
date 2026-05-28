@@ -1528,7 +1528,7 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     
     .app-header {
         position: relative !important; /* ESTABLISH AN ABSOLUTE COORDINATE BASE SYSTEM */
-        padding: 48px 16px 16px 16px !important; /* Lower the title slightly from the top to fit mobile notch */
+        padding: 48px 54px 16px 54px !important; /* Lower the title slightly from the top to fit mobile notch and clear hamburger */
         flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
@@ -1905,7 +1905,7 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
 
     .app-header {
         position: relative !important; /* ESTABLISH AN ABSOLUTE COORDINATE BASE SYSTEM */
-        padding: 48px 14px 16px 14px !important; /* Lower the title slightly from the top to fit mobile notch */
+        padding: 48px 54px 16px 54px !important; /* Lower the title slightly from the top to fit mobile notch and clear hamburger */
         flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
