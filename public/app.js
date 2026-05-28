@@ -64,6 +64,120 @@ let currentHoldings = {}; // מוחזק עבור הלקוח הפעיל במסך 
 let displayCurrency = 'USD';
 let usdToIlsRate = 3.75; // שער חליפין דינמי, יימשך בזמן אמת באמצעות ILS=X
 
+let wsClient = null;
+let wsPingInterval = null;
+
+function initWebSocket() {
+    if (!currentUser) return;
+    
+    // Close existing socket if any
+    if (wsClient) {
+        try {
+            wsClient.close();
+        } catch(e) {}
+    }
+    if (wsPingInterval) {
+        clearInterval(wsPingInterval);
+    }
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}?userId=${currentUser.id}`;
+    
+    console.log(`[WS] Connecting to ${wsUrl}`);
+    wsClient = new WebSocket(wsUrl);
+    
+    wsClient.onopen = () => {
+        console.log('[WS] Connected to real-time communication server');
+        // Setup a ping interval to keep connection alive
+        wsPingInterval = setInterval(() => {
+            if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                wsClient.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+    };
+    
+    wsClient.onmessage = async (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            console.log('[WS] Message received:', msg);
+            
+            if (msg.type === 'new_message_to_client') {
+                const tip = msg.data;
+                
+                // Add tip to allTips if not already exists
+                if (!allTips.some(t => t.id === tip.id)) {
+                    allTips.push(tip);
+                }
+                
+                if (currentUser.role === 'client') {
+                    // Update client UI
+                    renderPersonalTips();
+                    
+                    // Increment personal chat badge if drawer is closed
+                    const chatDrawer = document.getElementById('personal-chat-drawer');
+                    const isDrawerOpen = chatDrawer && chatDrawer.style.right === '0px';
+                    if (!isDrawerOpen) {
+                        const chatBadge = document.getElementById('personal-chat-badge');
+                        if (chatBadge) {
+                            const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender === 'avi');
+                            chatBadge.textContent = personalTips.length.toString();
+                            chatBadge.style.display = 'flex';
+                        }
+                        
+                        // Show visual toast if drawer is closed
+                        showToast(`הודעה חדשה מאבי: ${tip.content}`, 'success');
+                    }
+                }
+            } else if (msg.type === 'new_message_to_advisor') {
+                const tip = msg.data;
+                
+                // Add to allTips
+                if (!allTips.some(t => t.id === tip.id)) {
+                    allTips.push(tip);
+                }
+                
+                if (currentUser.role === 'admin') {
+                    // Update advisor UI if viewing that client
+                    if (activeViewingClientId === tip.target_user_id) {
+                        renderAdminClientChatHistory();
+                    }
+                    
+                    // Show advisor notification toast
+                    const senderName = tip.sender_name || 'הלקוח';
+                    showToast(`התקבלה הודעה חדשה מ-${senderName}: ${tip.content}`, 'success');
+                }
+            } else if (msg.type === 'new_daily_ai_tips') {
+                const tips = msg.data;
+                // Merge tips
+                tips.forEach(t => {
+                    if (!allTips.some(existing => existing.id === t.id)) {
+                        allTips.push(t);
+                    }
+                });
+                if (currentUser.role === 'client') {
+                    renderAITips();
+                    updateAIHealthScore();
+                    showToast('המלצות AI יומיות חדשות הגיעו!', 'info');
+                }
+            }
+        } catch (e) {
+            console.error('[WS] Failed to parse WS message:', e);
+        }
+    };
+    
+    wsClient.onclose = () => {
+        console.log('[WS] Connection closed. Attempting reconnect in 5s...');
+        if (wsPingInterval) clearInterval(wsPingInterval);
+        setTimeout(() => {
+            if (currentUser) initWebSocket();
+        }, 5000);
+    };
+    
+    wsClient.onerror = (err) => {
+        console.error('[WS] Socket error:', err);
+    };
+}
+
 // ==================== 1. אתחול והגדרת נתוני ברירת מחדל (Bootstrap) ====================
 document.addEventListener("DOMContentLoaded", () => {
     initLocalCache();
@@ -337,6 +451,9 @@ async function setupAppForUser() {
         initAIChat();
     }
 
+    // Initialize real-time WebSockets
+    initWebSocket();
+
     showToast(`ברוך הבא, ${currentUser.name}!`, 'success');
 }
 
@@ -520,6 +637,17 @@ async function handleAuthSubmit(event) {
 }
 
 function handleLogout() {
+    // Gracefully disconnect WebSockets on logout
+    if (wsClient) {
+        try {
+            wsClient.close();
+        } catch (e) {}
+        wsClient = null;
+    }
+    if (wsPingInterval) {
+        clearInterval(wsPingInterval);
+        wsPingInterval = null;
+    }
     API.setToken(null);
     sessionStorage.removeItem('current_user');
     currentUser = null;
@@ -558,11 +686,11 @@ function switchView(view) {
     const subtitleEl = document.getElementById('view-subtitle');
     const headerActionArea = document.getElementById('header-action-area');
 
-    // ברירת מחדל: הצג כפתור עסקה חדשה רק ללקוחות קצה
-    if (currentUser.role === 'client') {
+    // Show new transaction action button ONLY on the client dashboard tab
+    if (currentUser.role === 'client' && view === 'dashboard') {
         headerActionArea.style.display = 'block';
     } else {
-        headerActionArea.style.display = 'none'; // מנהלים לא מזינים עסקאות לעצמם במסך שלהם
+        headerActionArea.style.display = 'none';
     }
 
     if (view === 'dashboard') {
@@ -2121,9 +2249,12 @@ function refreshAdminCalculations() {
     });
 
     // עדכון מדדים בדף המנהל
-    document.getElementById('admin-val-aum').textContent = formatCurrency(totalAUM);
-    document.getElementById('admin-val-clients').textContent = clients.length;
-    document.getElementById('admin-val-tips').textContent = allTips.length;
+    const valAumEl = document.getElementById('admin-val-aum');
+    const valClientsEl = document.getElementById('admin-val-clients');
+    const valTipsEl = document.getElementById('admin-val-tips');
+    if (valAumEl) valAumEl.textContent = formatCurrency(totalAUM);
+    if (valClientsEl) valClientsEl.textContent = clients.length;
+    if (valTipsEl) valTipsEl.textContent = allTips.length;
     document.getElementById('admin-clients-count').textContent = `${clients.length} לקוחות`;
 
     // רינדור טבלת הלקוחות בדאשבורד המנהל

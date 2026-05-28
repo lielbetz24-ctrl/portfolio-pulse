@@ -167,12 +167,15 @@ const PortfolioEngine = (() => {
         const change = quote.change != null ? parseFloat(quote.change) : 0;
         const previousClose = quote.previousClose != null ? parseFloat(quote.previousClose) : (currentPrice / (1 + change / 100));
 
-        if (previousClose > 0) {
+        const isReset = shouldResetDailyPnL(holding.ticker);
+        if (previousClose > 0 && !isReset) {
           const holding_daily_change_usd = holding.quantity * (currentPrice - previousClose);
           totalDailyChangeUSD += holding_daily_change_usd;
           totalPreviousStockValue += holding.quantity * previousClose;
         } else {
-          totalPreviousStockValue += holding.market_value;
+          // If reset (e.g. before market open or weekend), daily change is 0,
+          // so previousClose is effectively currentPrice.
+          totalPreviousStockValue += holding.quantity * currentPrice;
         }
       }
     });
@@ -231,6 +234,10 @@ const PortfolioEngine = (() => {
     );
 
     return (allTips || []).filter(tip => {
+      // Direct personal tips (target_user_id !== null) are strictly excluded from general recommendations list
+      if (tip.target_user_id !== null && tip.target_user_id !== undefined) {
+        return false;
+      }
       if (tip.ticker === null || tip.ticker === undefined || tip.ticker === '') {
         return true;
       }
@@ -295,9 +302,40 @@ const PortfolioEngine = (() => {
     return timeInMinutes >= (9 * 60 + 30) && timeInMinutes < (16 * 60); // 09:30 - 16:00
   }
 
+  /**
+   * 1.6 זיהוי האם יש לאפס את התשואה היומית (כלומר מחוץ לשעות מסחר פעיל, סוף שבוע, או לפני הפתיחה)
+   */
+  function shouldResetDailyPnL(ticker) {
+    const symbol = (ticker || '').toUpperCase();
+    const now = new Date();
+    
+    // בורסת תל אביב (.TA)
+    if (symbol.endsWith('.TA')) {
+      const istDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+      const day = istDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 4 = Thursday
+      const hour = istDate.getHours();
+      const minute = istDate.getMinutes();
+      const timeInMinutes = hour * 60 + minute;
+      
+      if (day > 4) return true; // יום שישי / שבת (אין מסחר)
+      return timeInMinutes < (9 * 60 + 45); // לפני פתיחת השוק ב-09:45
+    }
+    
+    // בורסה אמריקאית (מחדל, NYSE / NASDAQ)
+    const estDate = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const day = estDate.getDay(); // 1 = Monday, ..., 5 = Friday
+    const hour = estDate.getHours();
+    const minute = estDate.getMinutes();
+    const timeInMinutes = hour * 60 + minute;
+    
+    if (day < 1 || day > 5) return true; // יום שבת / ראשון (אין מסחר)
+    return timeInMinutes < (9 * 60 + 30); // לפני פתיחת השוק ב-09:30
+  }
+
   return {
     computeHoldingsFromTransactions,
     isAssetMarketOpen,
+    shouldResetDailyPnL,
     enrichHoldingsWithMarketPrices,
     calculatePortfolioMetrics,
     calculateTotalEquity,

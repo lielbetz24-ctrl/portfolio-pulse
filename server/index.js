@@ -11,6 +11,91 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const JWT_SECRET = process.env.JWT_SECRET || 'portfoliopulse-dev-secret-change-in-production';
 
+const activeSockets = new Map(); // Maps userId -> Set of sockets
+
+function decodeWSFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const firstByte = buffer[0];
+  const secondByte = buffer[1];
+  
+  const fin = (firstByte & 0x80) !== 0;
+  const opcode = firstByte & 0x0F;
+  const masked = (secondByte & 0x80) !== 0;
+  let payloadLen = secondByte & 0x7F;
+  
+  let offset = 2;
+  if (payloadLen === 126) {
+    if (buffer.length < 4) return null;
+    payloadLen = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (payloadLen === 127) {
+    if (buffer.length < 10) return null;
+    const high = buffer.readUInt32BE(2);
+    const low = buffer.readUInt32BE(6);
+    payloadLen = low;
+    offset = 10;
+  }
+  
+  if (masked) {
+    if (buffer.length < offset + 4) return null;
+    const maskKey = buffer.slice(offset, offset + 4);
+    offset += 4;
+    
+    if (buffer.length < offset + payloadLen) return null;
+    const payload = buffer.slice(offset, offset + payloadLen);
+    
+    const decrypted = Buffer.alloc(payloadLen);
+    for (let i = 0; i < payloadLen; i++) {
+      decrypted[i] = payload[i] ^ maskKey[i % 4];
+    }
+    return { fin, opcode, payload: decrypted, totalLength: offset + payloadLen };
+  } else {
+    if (buffer.length < offset + payloadLen) return null;
+    const payload = buffer.slice(offset, offset + payloadLen);
+    return { fin, opcode, payload, totalLength: offset + payloadLen };
+  }
+}
+
+function encodeWSFrame(text) {
+  const payload = Buffer.from(text, 'utf8');
+  const len = payload.length;
+  let header;
+  
+  if (len <= 125) {
+    header = Buffer.alloc(2);
+    header[0] = 0x81;
+    header[1] = len;
+  } else if (len <= 65535) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeUInt32BE(0, 2);
+    header.writeUInt32BE(len, 6);
+  }
+  
+  return Buffer.concat([header, payload]);
+}
+
+function sendWebSocketMessage(userId, messageObj) {
+  const userSockets = activeSockets.get(userId);
+  if (userSockets) {
+    const text = JSON.stringify(messageObj);
+    const frame = encodeWSFrame(text);
+    for (const socket of userSockets) {
+      try {
+        socket.write(frame);
+      } catch (e) {
+        console.error(`[WS Send Error] Failed to send to ${userId}:`, e.message);
+      }
+    }
+  }
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -58,6 +143,22 @@ function readDb() {
   if (!db.notifications) db.notifications = [];
   if (!db.subscriptions) db.subscriptions = [];
   
+  // Ephemeral AI Tips: Clean up daily AI tips older than 24 hours
+  if (db.tips) {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const initialCount = db.tips.length;
+    db.tips = db.tips.filter(t => {
+      if (t.recommender === 'ai') {
+        const createdAtTime = t.created_at ? new Date(t.created_at).getTime() : new Date(t.date || Date.now()).getTime();
+        return createdAtTime > oneDayAgo;
+      }
+      return true; // Keep advisor tips permanently
+    });
+    if (db.tips.length !== initialCount) {
+      writeDb(db);
+    }
+  }
+
   // Recalculate and synchronize cash balances dynamically
   syncPortfoliosCashBalances(db);
   
@@ -310,8 +411,12 @@ async function generateDailyAITips(db) {
     date: today
   });
 
-  // Add all to database
-  db.tips.push(...tipsToCreate);
+  // Add all to database with created_at timestamps
+  const tipsWithCreatedAt = tipsToCreate.map(t => ({
+    ...t,
+    created_at: new Date().toISOString()
+  }));
+  db.tips.push(...tipsWithCreatedAt);
   
   // Trigger AI Daily Tip Push Notification
   const newNotif = {
@@ -327,6 +432,16 @@ async function generateDailyAITips(db) {
 
   writeDb(db);
   console.log(`[AI Tips Generator] Successfully created 3 daily tips and broadcast notification for ${today}.`);
+
+  // Broadcast the new daily tips to all connected WebSocket clients instantly
+  if (typeof activeSockets !== 'undefined') {
+    for (const userId of activeSockets.keys()) {
+      sendWebSocketMessage(userId, {
+        type: 'new_daily_ai_tips',
+        data: tipsWithCreatedAt
+      });
+    }
+  }
 }
 
 function serveStatic(req, res, filePath) {
@@ -542,7 +657,7 @@ async function handleApi(req, res, pathname, query) {
     let targetUser = targetUserId;
 
     if (body.recommender === 'client') {
-      notifTitle = `הודעה חדשה מ-${user.name}`;
+      notifTitle = `התקבלה הודעה חדשה מ-${user.name}`;
       notifBody = body.content.trim();
       targetUser = 'u_admin_avi'; // Send notification to Avi
     } else if (targetUserId) {
@@ -565,6 +680,36 @@ async function handleApi(req, res, pathname, query) {
     db.notifications.push(newNotif);
 
     writeDb(db);
+
+    // Dynamic real-time WebSockets event triggering
+    if (body.recommender === 'client') {
+      // Broadcast reply to Admin Avi
+      sendWebSocketMessage('u_admin_avi', {
+        type: 'new_message_to_advisor',
+        data: {
+          ...tip,
+          sender_name: user.name
+        }
+      });
+    } else {
+      // Advisor recommendation
+      if (targetUserId) {
+        // Direct personal tip to a single client
+        sendWebSocketMessage(targetUserId, {
+          type: 'new_message_to_client',
+          data: tip
+        });
+      } else {
+        // Public community tip to all connected users
+        for (const uid of activeSockets.keys()) {
+          sendWebSocketMessage(uid, {
+            type: 'new_message_to_client',
+            data: tip
+          });
+        }
+      }
+    }
+
     return sendJson(res, 201, { tip });
   }
 
@@ -689,7 +834,121 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+function startDailyAITipsCron() {
+  let lastGeneratedDate = '';
+  
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const jerusalemStr = now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" });
+      const jerusalemDate = new Date(jerusalemStr);
+      
+      const hours = jerusalemDate.getHours();
+      const minutes = jerusalemDate.getMinutes();
+      const dateKey = jerusalemDate.toISOString().split('T')[0];
+      
+      if (hours === 8 && minutes === 0 && lastGeneratedDate !== dateKey) {
+        lastGeneratedDate = dateKey;
+        console.log(`[Cron] Triggering daily AI tips generation for Jerusalem time: ${jerusalemStr}`);
+        const db = readDb();
+        await generateDailyAITips(db);
+      }
+    } catch (err) {
+      console.error('[Cron Error] Failed to run daily AI tips checker:', err.message);
+    }
+  }, 30000); // check every 30 seconds
+}
+
+server.on('upgrade', (req, socket, head) => {
+  if (req.headers['upgrade'] && req.headers['upgrade'].toLowerCase() === 'websocket') {
+    const key = req.headers['sec-websocket-key'];
+    if (!key) {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    
+    let userId = null;
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      userId = url.searchParams.get('userId');
+    } catch (e) {
+      console.error('[WS Upgrade] Failed to parse URL:', e.message);
+    }
+    
+    if (!userId) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    
+    const acceptKey = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+    
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      'Sec-WebSocket-Accept: ' + acceptKey + '\r\n\r\n'
+    );
+    
+    if (!activeSockets.has(userId)) {
+      activeSockets.set(userId, new Set());
+    }
+    activeSockets.get(userId).add(socket);
+    console.log(`[WS] User ${userId} connected. Total active users: ${activeSockets.size}`);
+    
+    let buffer = Buffer.alloc(0);
+    
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (true) {
+        const frame = decodeWSFrame(buffer);
+        if (!frame) break;
+        
+        buffer = buffer.slice(frame.totalLength);
+        
+        if (frame.opcode === 8) {
+          socket.end();
+          break;
+        }
+        
+        if (frame.opcode === 1) {
+          const msgText = frame.payload.toString('utf8');
+          try {
+            const msg = JSON.parse(msgText);
+            if (msg.type === 'ping') {
+              socket.write(encodeWSFrame(JSON.stringify({ type: 'pong' })));
+            }
+          } catch (e) {
+            console.error('[WS Message] Error processing text frame:', e.message);
+          }
+        }
+      }
+    });
+    
+    socket.on('close', () => {
+      const userSockets = activeSockets.get(userId);
+      if (userSockets) {
+        userSockets.delete(socket);
+        if (userSockets.size === 0) {
+          activeSockets.delete(userId);
+        }
+      }
+      console.log(`[WS] User ${userId} disconnected. Total active users: ${activeSockets.size}`);
+    });
+    
+    socket.on('error', (err) => {
+      console.error(`[WS Socket Error] user: ${userId}, error:`, err.message);
+      socket.destroy();
+    });
+  } else {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+  }
+});
+
 readDb();
+startDailyAITipsCron();
 server.listen(PORT, () => {
   console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
   console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);

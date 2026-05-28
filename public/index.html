@@ -378,17 +378,23 @@
                 <!-- 4. המלצות וטיפים (AI & Community Recommendations) -->
                 <div id="view-ai-tips-pane" class="tab-pane">
                     <div class="ai-advisor-grid">
+                        <div class="visual-card health-card">
+                            <h3>ציון בריאות תיק השקעות (AI)</h3>
+                            <div class="score-circle-container">
+                                <div class="score-ring-wrapper">
+                                    <div class="score-value-display" id="health-score-value">--</div>
+                                    <svg class="score-svg" viewBox="0 0 100 100">
                                         <circle class="score-bg-ring" cx="50" cy="50" r="45"></circle>
                                         <circle class="score-fill-ring" id="score-ring" cx="50" cy="50" r="45" stroke-dasharray="283" stroke-dashoffset="42"></circle>
                                     </svg>
                                 </div>
                                 <div class="score-desc" id="health-score-desc">טוען ניתוח...</div>
                             </div>
+                        </div>
 
-                            <div class="visual-card tips-card">
-                                <h3>המלצות השקעה מותאמות אישית</h3>
-                                <div class="tips-container" id="ai-tips-list"></div>
-                            </div>
+                        <div class="visual-card tips-card">
+                            <h3>המלצות השקעה מותאמות אישית</h3>
+                            <div class="tips-container" id="ai-tips-list"></div>
                         </div>
                     </div>
                 </div>
@@ -398,41 +404,6 @@
 
                 <!-- 1. לוח בקרה ראשי ליועץ (Advisor Dashboard) -->
                 <div id="view-admin-dashboard-pane" class="tab-pane">
-                    <!-- שורת מדדים של היועץ -->
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-header">
-                                <span class="text-muted">סך הון מנוהל (AUM)</span>
-                                <span class="material-icons-round metric-icon blue">monetization_on</span>
-                            </div>
-                            <div class="metric-value" id="admin-val-aum">$0.00</div>
-                            <div class="metric-footer">
-                                <span class="text-muted">סך הכל שווי תיקי כלל הלקוחות</span>
-                            </div>
-                        </div>
-
-                        <div class="metric-card">
-                            <div class="metric-header">
-                                <span class="text-muted">לקוחות פעילים</span>
-                                <span class="material-icons-round metric-icon purple">group</span>
-                            </div>
-                            <div class="metric-value" id="admin-val-clients">0</div>
-                            <div class="metric-footer">
-                                <span class="text-muted">רשומים במערכת PortfolioPulse</span>
-                            </div>
-                        </div>
-
-                        <div class="metric-card">
-                            <div class="metric-header">
-                                <span class="text-muted">טיפים והמלצות פעילים</span>
-                                <span class="material-icons-round metric-icon green">campaign</span>
-                            </div>
-                            <div class="metric-value" id="admin-val-tips">0</div>
-                            <div class="metric-footer">
-                                <span class="text-muted">המלצות שוק וניירות ערך</span>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- רשימת הלקוחות -->
                     <div class="visual-card full-width">
@@ -472,10 +443,6 @@
                             <span class="material-icons-round">visibility</span>
                             <span>מצב צפייה בתיק לקוח: <strong id="detail-client-name">—</strong></span>
                         </div>
-                        <button class="btn btn-success" onclick="openPersonalTipModal()" style="margin-right: auto; margin-left: 0;">
-                            <span class="material-icons-round">campaign</span>
-                            <span>שליחת טיפ אישי</span>
-                        </button>
                     </div>
 
                     <!-- מדדי הלקוח הספציפי -->
