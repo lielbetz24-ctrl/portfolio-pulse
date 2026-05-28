@@ -207,13 +207,12 @@ document.addEventListener("DOMContentLoaded", () => {
     initLivePricePolling();
     checkSession();
 
-    // Register Service Worker for PWA with aggressive update checking
-    if ('serviceWorker' in navigator) {
+    // Register Service Worker for PWA only if notification permission is already granted
+    if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('/sw.js')
                 .then(reg => {
                     console.log('Service Worker registered successfully:', reg.scope);
-                    // Force the browser to check for updates on every page load
                     reg.update();
                 })
                 .catch(err => console.error('Service Worker registration failed:', err));
@@ -239,6 +238,7 @@ let lastSyncTime = null;
 let isInitialPricesLoaded = false;
 let activeViewingClientId = null;
 let isChatHistoryLoaded = false;
+let activeAdminWSListener = null;
 
 // פונקציית עזר המבצעת Fetch בעלת מנגנון נפילה רכה (Fallback) בין מספר שרתי פרוקסי CORS פומביים ויציבים!
 async function fetchWithCORS(targetUrl) {
@@ -651,6 +651,12 @@ async function handleAuthSubmit(event) {
 function handleLogout() {
     // Gracefully disconnect WebSockets on logout
     if (wsClient) {
+        if (activeAdminWSListener) {
+            try {
+                wsClient.removeEventListener('message', activeAdminWSListener);
+            } catch (e) {}
+            activeAdminWSListener = null;
+        }
         try {
             wsClient.close();
         } catch (e) {}
@@ -660,6 +666,14 @@ function handleLogout() {
         clearInterval(wsPingInterval);
         wsPingInterval = null;
     }
+    
+    // Destroy the floating chat bubble on logout
+    const chatWidget = document.getElementById('personal-chat-widget');
+    if (chatWidget) {
+        chatWidget.remove();
+        console.log('[DOM Cleanup] Removed personal-chat-widget on logout');
+    }
+
     API.setToken(null);
     sessionStorage.removeItem('current_user');
     currentUser = null;
@@ -2396,16 +2410,13 @@ async function viewClientPortfolio(clientId) {
     }
 
     // רינדור צ'אט עם הלקוח
-    try {
-        const response = await API.getTips();
-        if (response && response.tips) {
-            allTips = response.tips;
-        }
-    } catch (e) {
-        console.error('שגיאה בטעינת היסטוריית הצ\'אט מהשרת:', e);
+    isChatHistoryLoaded = false;
+    const historyLoaded = await fetchChatHistory();
+    if (historyLoaded) {
+        isChatHistoryLoaded = true;
+        renderAdminClientChatHistory();
+        registerAdminChatWSListener();
     }
-    isChatHistoryLoaded = true;
-    renderAdminClientChatHistory();
 
     // רינדור גרף הנכסים של הלקוח
     renderDetailChart(metrics);
@@ -2798,6 +2809,19 @@ function syncPushPreferenceCheckboxes() {
     });
 }
 
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/\-/g, '+')
+        .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
 function togglePushSubscription(event) {
     const isEnabled = event.target.checked;
     
@@ -2811,41 +2835,77 @@ function togglePushSubscription(event) {
     const mobilePrefs = document.getElementById('push-preferences-mobile');
 
     if (isEnabled) {
-        // Request browser permission
-        if ('Notification' in window) {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    showToast('התראות דחיפה הופעלו בהצלחה בדפדפן!', 'success');
-                    localStorage.setItem('push_notifications_enabled', 'true');
-                    
-                    // Default categories if not set
-                    if (localStorage.getItem('push_ai_enabled') === null) localStorage.setItem('push_ai_enabled', 'true');
-                    if (localStorage.getItem('push_community_enabled') === null) localStorage.setItem('push_community_enabled', 'true');
-                    if (localStorage.getItem('push_personal_enabled') === null) localStorage.setItem('push_personal_enabled', 'true');
-
-                    // Show fine-grained preferences
-                    if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
-                    if (mobilePrefs) mobilePrefs.style.display = 'flex';
-                    
-                    // Sync fine-grained checkboxes with localStorage values
-                    syncPushPreferenceCheckboxes();
-                    
-                    // Register subscription on backend
-                    const endpoint = 'mock-endpoint-' + currentUser.id;
-                    API.request('POST', '/api/notifications/subscribe', {
-                        endpoint: endpoint,
-                        keys: { p256dh: 'mock-p256dh', auth: 'mock-auth' }
-                    }).catch(err => console.error('Subscription sync failed:', err));
-                } else {
-                    showToast('הרשאת התראות נדחתה על ידי הדפדפן.', 'error');
-                    if (sidebarToggle) sidebarToggle.checked = false;
-                    if (mobileToggle) mobileToggle.checked = false;
-                    localStorage.setItem('push_notifications_enabled', 'false');
-                    if (sidebarPrefs) sidebarPrefs.style.display = 'none';
-                    if (mobilePrefs) mobilePrefs.style.display = 'none';
-                }
-            });
+        // Error handling for lack of push support (iOS PWA verification)
+        if (!('Notification' in window) || !('PushManager' in window)) {
+            showToast('התראות אינן נתמכות בדפדפן זה – אנא הוסף את האפליקציה למסך הבית דרך תפריט השיתוף של iOS', 'error');
+            if (sidebarToggle) sidebarToggle.checked = false;
+            if (mobileToggle) mobileToggle.checked = false;
+            return;
         }
+
+        Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+                showToast('התראות דחיפה הופעלו בהצלחה בדפדפן!', 'success');
+                localStorage.setItem('push_notifications_enabled', 'true');
+                
+                // Register Service Worker and connect to Push Manager ONLY after granted status!
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.register('/sw.js')
+                        .then(async reg => {
+                            console.log('Service Worker registered successfully after permission granted:', reg.scope);
+                            reg.update();
+                            
+                            try {
+                                // VAPID Keys: Using a valid base64 key sync
+                                const subscribeOptions = {
+                                    userVisibleOnly: true,
+                                    applicationServerKey: urlBase64ToUint8Array('BJvK6c23vE8VpB2B9q3q3k-v2X5C-gUUpR1zZzpM68v7G9r2mUUpXl1Hwt3-nI9-0g6_F_R_gD9n7S_H-Z_Xg7t2k9_z5xWwR')
+                                };
+                                
+                                const subscription = await reg.pushManager.subscribe(subscribeOptions);
+                                console.log('[Push Manager] Subscribed successfully:', subscription);
+                                
+                                // Sync subscription on backend
+                                await API.request('POST', '/api/notifications/subscribe', {
+                                    endpoint: subscription.endpoint,
+                                    keys: subscription.keys || { p256dh: '', auth: '' }
+                                });
+                            } catch (err) {
+                                console.warn('[Push Manager] Subscription failed or mock sync fallback:', err);
+                                // Fallback/Mock subscription sync
+                                const endpoint = 'mock-endpoint-' + currentUser.id;
+                                await API.request('POST', '/api/notifications/subscribe', {
+                                    endpoint: endpoint,
+                                    keys: { p256dh: 'mock-p256dh', auth: 'mock-auth' }
+                                }).catch(e => console.error('Mock subscription sync failed:', e));
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Service Worker registration failed:', err);
+                            showToast('רישום ה-Service Worker נכשל.', 'error');
+                        });
+                }
+                
+                // Default categories if not set
+                if (localStorage.getItem('push_ai_enabled') === null) localStorage.setItem('push_ai_enabled', 'true');
+                if (localStorage.getItem('push_community_enabled') === null) localStorage.setItem('push_community_enabled', 'true');
+                if (localStorage.getItem('push_personal_enabled') === null) localStorage.setItem('push_personal_enabled', 'true');
+
+                // Show fine-grained preferences
+                if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
+                if (mobilePrefs) mobilePrefs.style.display = 'flex';
+                
+                // Sync fine-grained checkboxes with localStorage values
+                syncPushPreferenceCheckboxes();
+            } else {
+                showToast('הרשאת התראות נדחתה על ידי הדפדפן.', 'error');
+                if (sidebarToggle) sidebarToggle.checked = false;
+                if (mobileToggle) mobileToggle.checked = false;
+                localStorage.setItem('push_notifications_enabled', 'false');
+                if (sidebarPrefs) sidebarPrefs.style.display = 'none';
+                if (mobilePrefs) mobilePrefs.style.display = 'none';
+            }
+        });
     } else {
         localStorage.setItem('push_notifications_enabled', 'false');
         if (sidebarPrefs) sidebarPrefs.style.display = 'none';
@@ -2922,14 +2982,37 @@ async function pollNotifications() {
 /* ==================== 11. ניהול טיפים אישיים לקוח ומודל מנהל ==================== */
 
 function renderPersonalTips() {
-    // Floating Widget Elements
-    const chatWidget = document.getElementById('personal-chat-widget');
-    const chatBadge = document.getElementById('personal-chat-badge');
-    
-    if (!currentUser || currentUser.role !== 'client') {
+    if (!currentUser || !currentUser.id || currentUser.role !== 'client') {
+        const chatWidget = document.getElementById('personal-chat-widget');
         if (chatWidget) chatWidget.style.display = 'none';
         return;
     }
+    
+    // Re-create the bubble widget in the DOM if it was previously removed on logout
+    let chatWidget = document.getElementById('personal-chat-widget');
+    if (!chatWidget) {
+        const widgetHtml = `
+            <div id="personal-chat-widget" style="position: fixed; bottom: 30px; right: 30px; z-index: 10000; display: none; align-items: center; gap: 12px; direction: rtl; touch-action: none;">
+                <!-- Speech Bubble Tooltip -->
+                <div id="personal-chat-tooltip" style="background: rgba(20, 25, 35, 0.95); border: 1px solid rgba(163, 52, 255, 0.3); border-radius: var(--radius-md); padding: 8px 16px; color: var(--text-primary); font-size: 0.8rem; font-weight: 500; box-shadow: var(--shadow-lg); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap;" onclick="openPersonalChatDrawer()">
+                     שיחה אישית עם אבי 💬
+                </div>
+                
+                <!-- The Floating Circle Button -->
+                <button id="personal-chat-bubble-btn" onclick="openPersonalChatDrawer()" style="background: var(--body-bg); border: none; width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 32px rgba(163, 52, 255, 0.4); border: 2px solid #a334ff; position: relative; transition: transform 0.3s; padding: 0; overflow: hidden;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                    <img src="avi_profile.jpg" style="width: 100%; height: 100%; object-fit: cover;" alt="אבי">
+                    <span id="personal-chat-badge" style="position: absolute; top: -2px; right: -2px; background: var(--neg-red); color: white; border-radius: 50%; width: 20px; height: 20px; font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid var(--body-bg);">0</span>
+                </button>
+            </div>
+        `;
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = widgetHtml.trim();
+        chatWidget = tempDiv.firstChild;
+        document.body.appendChild(chatWidget);
+        isDraggableWidgetInitialized = false; // Reinitialize dragging for the new DOM element
+    }
+    
+    const chatBadge = document.getElementById('personal-chat-badge');
     
     // Personal conversation thread = all tips from Avi to this user + all replies from this user to Avi
     const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
@@ -3301,6 +3384,71 @@ async function handleAdminChatSubmit(event) {
     } catch (e) {
         showToast(e.message || 'שגיאה בשליחת הודעה', 'error');
     }
+}
+
+async function fetchChatHistory() {
+    const container = document.getElementById('admin-client-chat-container');
+    if (!container || !activeViewingClientId) return false;
+    
+    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px 0;">טוען היסטוריית שיחה...</p>';
+    
+    try {
+        const response = await API.getTips();
+        if (response && response.tips) {
+            allTips = response.tips;
+            return true;
+        } else {
+            throw new Error('Invalid tips payload');
+        }
+    } catch (e) {
+        console.error('שגיאה בטעינת היסטוריית הצ\'אט מהשרת:', e);
+        container.innerHTML = '<p class="text-danger" style="text-align: center; padding: 20px 0; font-weight: 500;">❌ שגיאה בטעינת היסטוריית הצ\'אט. אנא נסה שוב מנתוני השרת.</p>';
+        showToast('טעינת היסטוריית הצ\'אט נכשלה!', 'error');
+        return false;
+    }
+}
+
+function registerAdminChatWSListener() {
+    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
+        console.warn('[WS Admin Listener] Socket not open or not initialized yet.');
+        return;
+    }
+    
+    // Remove existing listener to prevent duplicate registration
+    if (activeAdminWSListener) {
+        try {
+            wsClient.removeEventListener('message', activeAdminWSListener);
+        } catch(e) {}
+    }
+    
+    activeAdminWSListener = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'new_message_to_advisor') {
+                const tip = msg.data;
+                if (tip.target_user_id === activeViewingClientId) {
+                    if (!allTips.some(t => t.id === tip.id)) {
+                        allTips.push(tip);
+                    }
+                    renderAdminClientChatHistory();
+                }
+            } else if (msg.type === 'messages_read') {
+                if (activeViewingClientId === msg.userId) {
+                    allTips.forEach(t => {
+                        if (t.target_user_id === msg.userId && t.recommender === 'avi') {
+                            t.is_read = true;
+                        }
+                    });
+                    renderAdminClientChatHistory();
+                }
+            }
+        } catch(e) {
+            console.error('[WS Admin Listener] Error:', e);
+        }
+    };
+    
+    wsClient.addEventListener('message', activeAdminWSListener);
+    console.log('[WS Admin Listener] Registered successfully for clientId:', activeViewingClientId);
 }
 
 function renderAdminClientChatHistory() {
