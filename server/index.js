@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
+const webpush = require('./webpush');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, '..');
@@ -169,6 +170,63 @@ function writeDb(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 }
 
+function ensureVapidKeys(db) {
+  if (!db.vapidKeys || !db.vapidKeys.publicKey || !db.vapidKeys.privateKeyPem) {
+    console.log('[VAPID] Generating new persistent P-256 VAPID keypair...');
+    db.vapidKeys = webpush.generateVapidKeys();
+    writeDb(db);
+  }
+  return db.vapidKeys;
+}
+
+async function triggerPushNotification(db, targetUserId, payloadObj) {
+  const vapidKeys = db.vapidKeys;
+  if (!vapidKeys) {
+    console.warn('[Push Trigger] No VAPID keys generated yet.');
+    return;
+  }
+  
+  db.subscriptions = db.subscriptions || [];
+  let targets = [];
+  if (targetUserId) {
+    targets = db.subscriptions.filter(s => s.user_id === targetUserId);
+  } else {
+    targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
+  }
+  
+  console.log(`[Push Trigger] Sending push to ${targets.length} subscription(s) for user: ${targetUserId || 'all clients'}`);
+  
+  const payloadString = JSON.stringify(payloadObj);
+  
+  const promises = targets.map(subRecord => {
+    const subscription = subRecord.subscription || { endpoint: subRecord.endpoint, keys: subRecord.keys };
+    
+    if (subscription.endpoint.startsWith('mock-')) {
+      console.log(`[Push Trigger] Skipping mock subscription for user ${subRecord.user_id}`);
+      return Promise.resolve({ success: true, mock: true });
+    }
+    
+    return webpush.sendNotification(vapidKeys, subscription, payloadString)
+      .then(res => {
+        if (!res.success) {
+          console.warn(`[Push Trigger] Failed to send push for subscription ${subRecord.id} (user ${subRecord.user_id}):`, res.error || res.statusCode);
+          if (res.statusCode === 410 || res.statusCode === 404) {
+            console.log(`[Push Trigger] Removing expired subscription: ${subRecord.id}`);
+            db.subscriptions = db.subscriptions.filter(s => s.id !== subRecord.id);
+            writeDb(db);
+          }
+        }
+        return res;
+      })
+      .catch(err => {
+        console.error(`[Push Trigger] Error sending push for subscription ${subRecord.id}:`, err);
+        return { success: false, error: err.message };
+      });
+  });
+  
+  await Promise.all(promises);
+}
+
 function seedDb(db) {
   const adminId = 'u_admin_avi';
   db.users.push({
@@ -251,9 +309,24 @@ function sendJson(res, status, obj) {
 }
 
 function getAuth(req) {
+  // 1. Try Authorization header
   const h = req.headers.authorization;
-  if (!h || !h.startsWith('Bearer ')) return null;
-  return verifyToken(h.slice(7));
+  if (h && h.startsWith('Bearer ')) {
+    return verifyToken(h.slice(7));
+  }
+  
+  // 2. Try URL query parameter 'token' (crucial for Service Worker background requests)
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    if (token) {
+      return verifyToken(token);
+    }
+  } catch (e) {
+    // Ignore URL parse errors
+  }
+  
+  return null;
 }
 
 const PRICE_CACHE = {};
@@ -724,6 +797,13 @@ async function handleApi(req, res, pathname, query) {
 
     writeDb(db);
 
+    // Trigger Web Push Notification asynchronously
+    triggerPushNotification(db, targetUser, {
+      title: notifTitle,
+      body: notifBody,
+      icon: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
+    }).catch(err => console.error('[Push Trigger] Async push notification error:', err));
+
     // Dynamic real-time WebSockets event triggering
     if (body.recommender === 'client') {
       // Broadcast reply to Admin Avi
@@ -809,6 +889,13 @@ async function handleApi(req, res, pathname, query) {
     } catch (e) {
       return sendJson(res, 502, { error: e.message, quotes: [] });
     }
+  }
+
+  if (pathname === '/api/notifications/vapid-public-key' && req.method === 'GET') {
+    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
+    const db = readDb();
+    const keys = ensureVapidKeys(db);
+    return sendJson(res, 200, { publicKey: keys.publicKey });
   }
 
   if (pathname === '/api/notifications/subscribe' && req.method === 'POST') {
@@ -1008,7 +1095,8 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-readDb();
+const db = readDb();
+ensureVapidKeys(db);
 startDailyAITipsCron();
 server.listen(PORT, () => {
   console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);

@@ -76,8 +76,8 @@ self.addEventListener('push', event => {
 
   const options = {
     body: data.body,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
+    icon: data.icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+    badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
     vibrate: [100, 50, 100],
     data: {
       url: '/'
@@ -95,8 +95,13 @@ self.addEventListener('notificationclick', event => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
       for (const client of clientList) {
-        if (client.url === '/' && 'focus' in client) {
-          return client.focus();
+        try {
+          const clientPath = new URL(client.url).pathname;
+          if ((clientPath === '/' || clientPath === '/index.html') && 'focus' in client) {
+            return client.focus();
+          }
+        } catch (e) {
+          // Ignore parse errors
         }
       }
       if (self.clients.openWindow) {

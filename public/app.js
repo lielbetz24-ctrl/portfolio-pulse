@@ -2856,19 +2856,27 @@ function togglePushSubscription(event) {
                             reg.update();
                             
                             try {
-                                // VAPID Keys: Using a valid base64 key sync
+                                // Fetch dynamic VAPID Public Key from Backend
+                                const vapidData = await API.request('GET', '/api/notifications/vapid-public-key');
+                                if (!vapidData || !vapidData.publicKey) {
+                                    throw new Error('Failed to retrieve VAPID public key');
+                                }
+
                                 const subscribeOptions = {
                                     userVisibleOnly: true,
-                                    applicationServerKey: urlBase64ToUint8Array('BJvK6c23vE8VpB2B9q3q3k-v2X5C-gUUpR1zZzpM68v7G9r2mUUpXl1Hwt3-nI9-0g6_F_R_gD9n7S_H-Z_Xg7t2k9_z5xWwR')
+                                    applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey)
                                 };
                                 
                                 const subscription = await reg.pushManager.subscribe(subscribeOptions);
                                 console.log('[Push Manager] Subscribed successfully:', subscription);
                                 
+                                // Correctly serialize using toJSON() to extract cryptographic keys
+                                const subJSON = subscription.toJSON();
+                                
                                 // Sync subscription on backend
                                 await API.request('POST', '/api/notifications/subscribe', {
-                                    endpoint: subscription.endpoint,
-                                    keys: subscription.keys || { p256dh: '', auth: '' }
+                                    endpoint: subJSON.endpoint,
+                                    keys: subJSON.keys || { p256dh: '', auth: '' }
                                 });
                             } catch (err) {
                                 console.warn('[Push Manager] Subscription failed or mock sync fallback:', err);
