@@ -36,8 +36,8 @@ const API = {
   getTips() {
     return this.request('GET', '/api/tips');
   },
-  createTip(ticker, content, recommender = 'avi', target_user_id = null) {
-    return this.request('POST', '/api/tips', { ticker, content, recommender, target_user_id });
+  createTip(ticker, content, recommender = 'avi', target_user_id = null, image_url = null) {
+    return this.request('POST', '/api/tips', { ticker, content, recommender, target_user_id, image_url });
   },
   deleteTip(id) {
     return this.request('DELETE', `/api/tips/${id}`);

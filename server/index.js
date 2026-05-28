@@ -418,10 +418,11 @@ async function generateDailyAITips(db) {
   }));
   db.tips.push(...tipsWithCreatedAt);
   
-  // Trigger AI Daily Tip Push Notification
+  // Trigger AI Daily Tip Push Notification (Disabled in v2.5.0)
+  /*
   const newNotif = {
     id: uid('nt'),
-    user_id: null, // Broadcast to all subscribed users!
+    user_id: null,
     title: 'PortfolioPulse AI: ניתוח שוק חדש',
     body: 'הבוט שלנו סרק את השוק והעלה תובנות חדשות להיום. היכנסו לראות.',
     created_at: new Date().toISOString(),
@@ -429,6 +430,7 @@ async function generateDailyAITips(db) {
   };
   db.notifications = db.notifications || [];
   db.notifications.push(newNotif);
+  */
 
   writeDb(db);
   console.log(`[AI Tips Generator] Successfully created 3 daily tips and broadcast notification for ${today}.`);
@@ -530,6 +532,7 @@ async function handleApi(req, res, pathname, query) {
       is_read: t.is_read || false,
       created_at: t.created_at || null,
       timestamp: t.timestamp || null,
+      image_url: t.image_url || null,
       date: t.date || t.created_at?.split('T')[0]
     }));
     
@@ -618,6 +621,27 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 201, { transaction: tx });
   }
 
+  if (pathname === '/api/upload' && req.method === 'POST') {
+    if (!user || user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
+    const body = await readBody(req);
+    if (!body.image) return sendJson(res, 400, { error: 'נא לספק תמונה' });
+    
+    try {
+      const uploadsDir = path.join(PUBLIC, 'uploads');
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      
+      const base64Data = body.image.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, 'base64');
+      const filename = `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
+      const filePath = path.join(uploadsDir, filename);
+      
+      fs.writeFileSync(filePath, buffer);
+      return sendJson(res, 200, { url: `/uploads/${filename}` });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
   if (pathname === '/api/tips' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const db = readDb();
@@ -632,6 +656,7 @@ async function handleApi(req, res, pathname, query) {
       is_read: t.is_read || false,
       created_at: t.created_at || null,
       timestamp: t.timestamp || null,
+      image_url: t.image_url || null,
       date: t.date || t.created_at?.split('T')[0] 
     }));
     return sendJson(res, 200, { tips });
@@ -664,6 +689,7 @@ async function handleApi(req, res, pathname, query) {
       is_read: false,
       created_at: new Date().toISOString(),
       timestamp: Date.now(),
+      image_url: body.image_url || null,
       date: new Date().toISOString().split('T')[0]
     };
     db.tips.push(tip);

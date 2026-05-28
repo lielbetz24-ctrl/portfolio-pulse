@@ -510,14 +510,9 @@ function renderSidebarNavigation() {
                     <span class="material-icons-round">history</span>
                     <span>היסטוריית עסקאות</span>
                 </button>
-                <button class="nav-item nav-accent" onclick="switchView('ai-chat')" id="nav-ai-chat">
-                    <span class="material-icons-round sparkle-icon" style="color: #a334ff;">psychology</span>
-                    <span>צ'אט יועץ AI</span>
-                    <span class="badge" style="background: #a334ff; color: white;">Live</span>
-                </button>
                 <button class="nav-item" onclick="switchView('ai-tips')" id="nav-ai-tips">
                     <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
-                    <span>המלצות וטיפים</span>
+                    <span>המלצות וטיפים מאבי</span>
                 </button>
             `;
         }
@@ -546,14 +541,9 @@ function renderSidebarNavigation() {
                     <span class="material-icons-round">history</span>
                     <span>היסטוריית עסקאות</span>
                 </button>
-                <button class="mobile-nav-item mobile-nav-accent" onclick="switchView('ai-chat')" id="mobile-nav-ai-chat">
-                    <span class="material-icons-round sparkle-icon" style="color: #a334ff;">psychology</span>
-                    <span>צ'אט יועץ AI</span>
-                    <span class="mobile-badge-live" style="background: #a334ff; color: white;">Live</span>
-                </button>
                 <button class="mobile-nav-item" onclick="switchView('ai-tips')" id="mobile-nav-ai-tips">
                     <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
-                    <span>המלצות וטיפים</span>
+                    <span>המלצות וטיפים מאבי</span>
                 </button>
             `;
         }
@@ -1831,7 +1821,10 @@ function renderAITips() {
     const activePortfolio = portfolios[0];
     const metrics = calculatePortfolioMetrics(activePortfolio.id);
     const holdingTickers = [...PortfolioEngine.getPortfolioTickerSet(metrics.holdingsMap)];
-    const filteredTips = PortfolioEngine.filterTipsForPortfolio(allTips, holdingTickers);
+    
+    // Filter to only include Avi's recommendations
+    const aviTips = allTips.filter(t => t.recommender === 'avi');
+    const filteredTips = PortfolioEngine.filterTipsForPortfolio(aviTips, holdingTickers);
 
     if (filteredTips.length === 0) {
         tipsListEl.innerHTML = '<p class="text-muted" style="font-size: 0.8rem; text-align: center;">אין המלצות זמינות כרגע.</p>';
@@ -1842,30 +1835,24 @@ function renderAITips() {
         const div = document.createElement('div');
         div.className = 'tip-item';
 
-        const recommender = tip.recommender || (tip.id === 't5' || tip.id === 't6' ? 'ai' : 'avi');
         const isGeneral = tip.ticker === null;
+        const titleText = isGeneral ? 'אבי' : `אבי — המלצה ל-${tip.ticker}`;
         
-        let titleText = '';
-        let iconName = '';
-        let iconColorClass = '';
-        
-        if (recommender === 'ai') {
-            titleText = isGeneral ? 'בוט AI' : `בוט AI — המלצה ל-${tip.ticker}`;
-            iconName = 'psychology';
-            iconColorClass = 'purple';
-        } else {
-            titleText = isGeneral ? 'אבי' : `אבי — המלצה ל-${tip.ticker}`;
-            iconName = 'person';
-            iconColorClass = 'green';
+        let imageHtml = '';
+        if (tip.image_url) {
+            imageHtml = `
+                <img src="${tip.image_url}" class="tip-image" style="max-width: 100%; border-radius: 8px; margin-top: 10px; cursor: pointer; object-fit: cover; max-height: 240px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: block;" onclick="openLightbox('${tip.image_url}')">
+            `;
         }
 
         div.innerHTML = `
-            <div class="tip-icon ${iconColorClass}">
-                <span class="material-icons-round">${iconName}</span>
+            <div class="tip-icon green">
+                <span class="material-icons-round">person</span>
             </div>
-            <div class="tip-content">
+            <div class="tip-content" style="flex: 1;">
                 <span class="tip-title">${titleText}</span>
                 <span class="tip-desc">${tip.content}</span>
+                ${imageHtml}
             </div>
         `;
         tipsListEl.appendChild(div);
@@ -2535,6 +2522,7 @@ function renderAdminTipsList() {
                     <span class="text-muted" style="font-size:0.75rem;">${tip.date}</span>
                 </div>
                 <p class="tip-desc" style="margin-top: 8px; font-size: 0.85rem; color: var(--text-primary);">${tip.content}</p>
+                ${tip.image_url ? `<img src="${tip.image_url}" style="max-width: 100%; border-radius: 6px; object-fit: cover; margin-top: 8px; cursor: pointer; max-height: 120px; display: block;" onclick="openLightbox('${tip.image_url}')">` : ''}
             </div>
             <button class="btn-delete-tip" onclick="handleDeleteTip('${tip.id}')" title="מחק המלצה">
                 <span class="material-icons-round" style="font-size:18px;">delete</span>
@@ -2559,34 +2547,119 @@ function toggleTipFormFields() {
     }
 }
 
+function handleTipImageSelect(event) {
+    const file = event.target.files[0];
+    const filenameSpan = document.getElementById('tip-image-filename');
+    const previewImg = document.getElementById('tip-image-preview');
+    if (file) {
+        filenameSpan.textContent = file.name;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            previewImg.src = e.target.result;
+            previewImg.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    } else {
+        filenameSpan.textContent = 'בחר תמונה מהמכשיר...';
+        previewImg.src = '';
+        previewImg.style.display = 'none';
+    }
+}
+
+function compressAndUploadImage(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 900;
+                if (width > height) {
+                    if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                    }
+                } else {
+                    if (height > MAX_HEIGHT) {
+                        width *= MAX_HEIGHT / height;
+                        height = MAX_HEIGHT;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                
+                API.request('POST', '/api/upload', { image: dataUrl })
+                    .then(res => resolve(res.url))
+                    .catch(err => reject(err));
+            };
+            img.onerror = () => reject(new Error('שגיאה בטעינת קובץ התמונה לביצוע דחיסה'));
+            img.src = event.target.result;
+        };
+        reader.onerror = () => reject(new Error('שגיאה בקריאת קובץ התמונה מהמכשיר'));
+        reader.readAsDataURL(file);
+    });
+}
+
 async function handleCreateTipSubmit(event) {
     event.preventDefault();
     const isStock = document.getElementById('tip-type-stock').checked;
     const ticker = document.getElementById('tip-ticker').value.trim().toUpperCase();
     const content = document.getElementById('tip-content').value.trim();
-    const recommender = document.getElementById('tip-author-ai').checked ? 'ai' : 'avi';
+    const recommender = 'avi'; // only avi recommendations allowed
 
     if (isStock && !ticker) {
         showToast('נא להזין סימול מניה עבור המלצה ספציפית!', 'error');
         return;
     }
 
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
     try {
-        await API.createTip(isStock ? ticker : null, content, recommender);
+        const fileInput = document.getElementById('tip-image-file');
+        const file = fileInput ? fileInput.files[0] : null;
+        let imageUrl = null;
+
+        if (file) {
+            showToast('מעבד ומעלה תמונה למערכת...', 'info');
+            imageUrl = await compressAndUploadImage(file);
+        }
+
+        await API.createTip(isStock ? ticker : null, content, recommender, null, imageUrl);
         const data = await API.getTips();
         allTips = data.tips || [];
 
         document.getElementById('tip-content').value = '';
         document.getElementById('tip-ticker').value = '';
         document.getElementById('tip-type-general').checked = true;
-        document.getElementById('tip-author-avi').checked = true;
         toggleTipFormFields();
+
+        // Clear image uploader
+        if (fileInput) fileInput.value = '';
+        const filenameSpan = document.getElementById('tip-image-filename');
+        if (filenameSpan) filenameSpan.textContent = 'בחר תמונה מהמכשיר...';
+        const previewImg = document.getElementById('tip-image-preview');
+        if (previewImg) {
+            previewImg.src = '';
+            previewImg.style.display = 'none';
+        }
 
         renderAdminTipsList();
         document.getElementById('admin-val-tips').textContent = allTips.length;
         showToast('המלצה חדשה פורסמה במערכת וזמינה ללקוחות קצה!', 'success');
     } catch (e) {
         showToast(e.message || 'שגיאה בפרסום ההמלצה', 'error');
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 
@@ -2862,10 +2935,93 @@ function renderPersonalTips() {
         }
     }
     
+    if (chatWidget && !isDraggableWidgetInitialized) {
+        initDraggableWidget();
+        isDraggableWidgetInitialized = true;
+    }
+    
     // Render the messages inside the floating chat drawer if it is currently open
     const chatDrawer = document.getElementById('personal-chat-drawer');
     if (chatDrawer && chatDrawer.style.right === '0px') {
         renderPersonalChatMessages();
+    }
+}
+
+let isWidgetDragging = false;
+let isDraggableWidgetInitialized = false;
+
+function initDraggableWidget() {
+    const widget = document.getElementById('personal-chat-widget');
+    const bubbleBtn = document.getElementById('personal-chat-bubble-btn');
+    if (!widget || !bubbleBtn) return;
+
+    let initialX, initialY;
+    let xOffset = 0, yOffset = 0;
+    let isMouseDown = false;
+    let dragStarted = false;
+
+    widget.style.transition = 'none'; // Prevent lag during dragging
+
+    bubbleBtn.addEventListener('mousedown', dragStart);
+    bubbleBtn.addEventListener('touchstart', dragStart, { passive: true });
+
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('touchmove', drag, { passive: false });
+
+    document.addEventListener('mouseup', dragEnd);
+    document.addEventListener('touchend', dragEnd);
+
+    function dragStart(e) {
+        if (e.type === 'touchstart') {
+            initialX = e.touches[0].clientX - xOffset;
+            initialY = e.touches[0].clientY - yOffset;
+        } else {
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+        }
+
+        isMouseDown = true;
+        dragStarted = false;
+    }
+
+    function drag(e) {
+        if (!isMouseDown) return;
+
+        let clientX, clientY;
+        if (e.type === 'touchmove') {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+            // Prevent default touch movement to avoid page bounce/scroll on mobile
+            e.preventDefault();
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        const currentX = clientX - initialX;
+        const currentY = clientY - initialY;
+
+        // Threshold of 5px to distinguish clicks from drags
+        if (Math.abs(currentX - xOffset) > 5 || Math.abs(currentY - yOffset) > 5) {
+            isWidgetDragging = true;
+            dragStarted = true;
+        }
+
+        if (dragStarted) {
+            xOffset = currentX;
+            yOffset = currentY;
+
+            // Apply smooth translation
+            widget.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
+        }
+    }
+
+    function dragEnd() {
+        isMouseDown = false;
+        // Keep dragging flag true slightly longer to block click triggers
+        setTimeout(() => {
+            isWidgetDragging = false;
+        }, 80);
     }
 }
 
@@ -2944,6 +3100,7 @@ async function handlePersonalTipSubmit(event) {
 /* ==================== 12. מגירת שיחה אישית ללקוח ומענה לאבי ==================== */
 
 function openPersonalChatDrawer() {
+    if (isWidgetDragging) return;
     const drawer = document.getElementById('personal-chat-drawer');
     if (drawer) {
         drawer.style.right = '0px';
@@ -3221,4 +3378,29 @@ function renderAdminClientChatHistory() {
     
     // Scroll to bottom
     container.scrollTop = container.scrollHeight;
+}
+
+function openLightbox(src) {
+    const modal = document.getElementById('lightbox-modal');
+    const img = document.getElementById('lightbox-img');
+    if (modal && img) {
+        img.src = src;
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            modal.style.opacity = '1';
+            img.style.transform = 'scale(1)';
+        }, 10);
+    }
+}
+
+function closeLightbox() {
+    const modal = document.getElementById('lightbox-modal');
+    const img = document.getElementById('lightbox-img');
+    if (modal && img) {
+        modal.style.opacity = '0';
+        img.style.transform = 'scale(0.95)';
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
+    }
 }

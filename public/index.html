@@ -34,8 +34,8 @@
         <div class="auth-card">
             <div class="auth-logo">
                 <span class="material-icons-round logo-icon">insights</span>
-                <h1>PortfolioPulse <span class="accent-text">AI</span></h1>
-                <p class="auth-subtitle">מעקב וניתוח תיקי השקעות מונחה בינה מלאכותית</p>
+                <h1>PortfolioPulse</h1>
+                <p class="auth-subtitle">מעקב וניתוח תיקי השקעות מתקדם</p>
             </div>
             
             <div class="auth-tabs">
@@ -102,7 +102,7 @@
         <aside class="sidebar">
             <div class="sidebar-logo">
                 <span class="material-icons-round logo-icon">insights</span>
-                <h2>PortfolioPulse <span class="accent-text">AI</span></h2>
+                <h2>PortfolioPulse</h2>
             </div>
 
             <div class="user-profile-pill">
@@ -143,7 +143,7 @@
                     
                     <!-- Fine-grained Preferences (Expanded when enabled) -->
                     <div id="push-preferences-sidebar" style="display: none; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); width: 100%;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                        <div style="display: none !important; align-items: center; justify-content: space-between; width: 100%;">
                             <span style="font-size: 0.65rem; color: var(--text-secondary);">ניתוחי AI יומיים:</span>
                             <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
                                 <input type="checkbox" id="push-opt-ai-sidebar" checked onchange="updatePushPreference('ai', this.checked)">
@@ -366,7 +366,7 @@
                 <!-- 4. המלצות וטיפים (AI & Community Recommendations) -->
                 <div id="view-ai-tips-pane" class="tab-pane">
                     <div class="ai-advisor-grid">
-                        <div class="visual-card health-card">
+                        <div class="visual-card health-card" style="display: none !important;">
                             <h3>ציון בריאות תיק השקעות (AI)</h3>
                             <div class="score-circle-container">
                                 <div class="score-ring-wrapper">
@@ -598,6 +598,16 @@
                                     </div>
                                 </div>
 
+                                <div class="form-group" style="margin-top: 15px;">
+                                    <label for="tip-image-file">העלאת תמונה להמלצה (אופציונלי)</label>
+                                    <div class="input-wrapper" style="padding: 14px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.12); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer;" onclick="document.getElementById('tip-image-file').click()">
+                                        <span class="material-icons-round" style="font-size: 32px; color: var(--accent-blue-start);">add_photo_alternate</span>
+                                        <span id="tip-image-filename" style="font-size: 0.8rem; color: var(--text-secondary);">בחר תמונה מהמכשיר...</span>
+                                        <input type="file" id="tip-image-file" accept="image/*" style="display: none;" onchange="handleTipImageSelect(event)">
+                                        <img id="tip-image-preview" style="max-width: 100%; max-height: 120px; border-radius: 8px; display: none; margin-top: 8px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);">
+                                    </div>
+                                </div>
+
                                 <button type="submit" class="btn btn-primary btn-block" style="margin-top: 10px;">
                                     <span class="material-icons-round">publish</span>
                                     <span>פרסם המלצה למערכת</span>
@@ -626,7 +636,7 @@
                     <div class="mobile-drawer-header">
                         <div class="sidebar-logo" style="margin-bottom: 0;">
                             <span class="material-icons-round logo-icon" style="font-size: 28px;">insights</span>
-                            <h2 style="font-size: 1.2rem; font-weight: 700;">PortfolioPulse <span class="accent-text">AI</span></h2>
+                            <h2 style="font-size: 1.2rem; font-weight: 700;">PortfolioPulse</h2>
                         </div>
                         <button class="drawer-close-btn" onclick="closeMobileDrawer()">
                             <span class="material-icons-round">close</span>
@@ -660,7 +670,7 @@
                             
                             <!-- Fine-grained Preferences (Expanded when enabled) -->
                             <div id="push-preferences-mobile" style="display: none; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); width: 100%;">
-                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                <div style="display: none !important; align-items: center; justify-content: space-between; width: 100%;">
                                     <span style="font-size: 0.65rem; color: var(--text-secondary);">ניתוחי AI יומיים:</span>
                                     <label class="switch" style="position: relative; display: inline-block; width: 28px; height: 16px;">
                                         <input type="checkbox" id="push-opt-ai-mobile" checked onchange="updatePushPreference('ai', this.checked)">
@@ -868,6 +878,14 @@
         <div id="personal-chat-messages-container" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
             <!-- Messages populated dynamically -->
         </div>
+    </div>
+
+    <!-- Lightbox Modal for Premium Image Viewer -->
+    <div id="lightbox-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 11000; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s ease; backdrop-filter: blur(10px);" onclick="closeLightbox()">
+        <button style="position: absolute; top: 20px; right: 20px; background: none; border: none; color: white; font-size: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+            <span class="material-icons-round" style="font-size: 36px;">close</span>
+        </button>
+        <img id="lightbox-img" style="max-width: 90%; max-height: 90%; border-radius: 8px; transform: scale(0.95); transition: transform 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.5);" alt="תצוגת המלצה">
     </div>
 
     <!-- הודעות התראה קופצות (Toasts) -->
