@@ -310,6 +310,11 @@ async function setupAppForUser() {
     document.getElementById('user-display-name').textContent = currentUser.name;
     document.getElementById('user-display-role').textContent = currentUser.role === 'admin' ? 'יועץ השקעות מנהל' : 'לקוח קצה';
 
+    const mobName = document.getElementById('mobile-user-name');
+    const mobRole = document.getElementById('mobile-user-role');
+    if (mobName) mobName.textContent = currentUser.name;
+    if (mobRole) mobRole.textContent = currentUser.role === 'admin' ? 'יועץ השקעות מנהל' : 'לקוח קצה';
+
     renderSidebarNavigation();
     await loadUserData();
 
@@ -331,7 +336,7 @@ function showAuthScreen() {
 // בניית תפריט הצד ותפריט המובייל התחתון בהתאם לתפקיד המשתמש
 function renderSidebarNavigation() {
     const navContainer = document.getElementById('sidebar-navigation');
-    const mobileNavContainer = document.getElementById('mobile-navigation');
+    const mobileNavContainer = document.getElementById('mobile-drawer-navigation');
 
     if (navContainer) {
         navContainer.innerHTML = '';
@@ -372,26 +377,26 @@ function renderSidebarNavigation() {
             mobileNavContainer.innerHTML = `
                 <button class="mobile-nav-item active" onclick="switchView('admin-dashboard')" id="mobile-nav-admin-dashboard">
                     <span class="material-icons-round">manage_accounts</span>
-                    <span>לוח יועץ</span>
+                    <span>לוח בקרה יועץ</span>
                 </button>
                 <button class="mobile-nav-item" onclick="switchView('admin-tips')" id="mobile-nav-admin-tips">
                     <span class="material-icons-round">campaign</span>
-                    <span>ניהול טיפים</span>
+                    <span>ניהול המלצות וטיפים</span>
                 </button>
             `;
         } else {
             mobileNavContainer.innerHTML = `
                 <button class="mobile-nav-item active" onclick="switchView('dashboard')" id="mobile-nav-dashboard">
                     <span class="material-icons-round">space_dashboard</span>
-                    <span>לוח בקרה</span>
+                    <span>לוח בקרה (Dashboard)</span>
                 </button>
                 <button class="mobile-nav-item" onclick="switchView('transactions')" id="mobile-nav-transactions">
                     <span class="material-icons-round">history</span>
-                    <span>עסקאות</span>
+                    <span>היסטוריית עסקאות</span>
                 </button>
                 <button class="mobile-nav-item mobile-nav-accent" onclick="switchView('ai-advisor')" id="mobile-nav-ai-advisor">
                     <span class="material-icons-round sparkle-icon">psychology</span>
-                    <span>יועץ AI</span>
+                    <span>יועץ השקעות AI</span>
                     <span class="mobile-badge-live">Live</span>
                 </button>
             `;
@@ -514,14 +519,18 @@ function switchView(view) {
     const navItem = document.getElementById(`nav-${view}`);
     if (navItem) navItem.classList.add('active');
 
-    // עדכון הטאב הפעיל בניווט התחתון (מובייל)
+    // עדכון הטאב הפעיל בניווט למובייל (המבורגר)
     document.querySelectorAll('.mobile-nav-item').forEach(item => item.classList.remove('active'));
     const mobileNavItem = document.getElementById(`mobile-nav-${view}`);
     if (mobileNavItem) mobileNavItem.classList.add('active');
 
     // הצגת הפאנל המתאים
     document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-    document.getElementById(`view-${view}-pane`).classList.add('active');
+    const targetPane = document.getElementById(`view-${view}-pane`);
+    if (targetPane) targetPane.classList.add('active');
+
+    // סגירה אוטומטית של תפריט המבורגר במובייל
+    closeMobileDrawer();
 
     // עדכון כותרת העמוד וסביבת הפעולה
     const titleEl = document.getElementById('view-title');
@@ -559,6 +568,21 @@ function switchView(view) {
     } else if (view === 'client-detail') {
         titleEl.textContent = 'צפייה בתיק לקוח';
         subtitleEl.textContent = 'סקירה מלאה, הרכב נכסים והיסטוריית פעולות של הלקוח הנבחר';
+    }
+}
+
+// פונקציות פתיחה וסגירה של תפריט המבורגר (Mobile Drawer)
+function toggleMobileDrawer() {
+    const drawer = document.getElementById('mobile-drawer');
+    if (drawer) {
+        drawer.classList.toggle('active');
+    }
+}
+
+function closeMobileDrawer() {
+    const drawer = document.getElementById('mobile-drawer');
+    if (drawer) {
+        drawer.classList.remove('active');
     }
 }
 

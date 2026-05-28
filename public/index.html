@@ -140,6 +140,10 @@
             
             <!-- ראש הדף (Header) -->
             <header class="app-header">
+                <!-- כפתור המבורגר למובייל -->
+                <button id="mobile-menu-btn" class="mobile-menu-trigger" onclick="toggleMobileDrawer()">
+                    <span class="material-icons-round">menu</span>
+                </button>
                 <div class="header-title">
                     <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
                         <h1 id="view-title" style="margin-bottom: 0;">לוח בקרה</h1>
@@ -578,8 +582,38 @@
                 </div>
 
             </div>
-            <!-- סרגל ניווט תחתון למובייל (Mobile Bottom Tab Bar) -->
-            <nav class="mobile-nav-bar" id="mobile-navigation"></nav>
+            <!-- תפריט המבורגר צידי למובייל (Mobile Hamburger Drawer) -->
+            <div id="mobile-drawer" class="mobile-drawer-overlay" onclick="closeMobileDrawer(event)">
+                <div class="mobile-drawer-content" onclick="event.stopPropagation()">
+                    <div class="mobile-drawer-header">
+                        <div class="sidebar-logo" style="margin-bottom: 0;">
+                            <span class="material-icons-round logo-icon" style="font-size: 28px;">insights</span>
+                            <h2 style="font-size: 1.2rem; font-weight: 700;">PortfolioPulse <span class="accent-text">AI</span></h2>
+                        </div>
+                        <button class="drawer-close-btn" onclick="closeMobileDrawer()">
+                            <span class="material-icons-round">close</span>
+                        </button>
+                    </div>
+                    <div class="user-profile-pill" style="margin-bottom: 24px; padding: 10px;">
+                        <div class="avatar">
+                            <span class="material-icons-round" style="font-size: 32px; color: var(--accent-blue-start);">account_circle</span>
+                        </div>
+                        <div class="user-info">
+                            <span id="mobile-user-name" class="user-name" style="font-size: 0.85rem; font-weight: 600;">טוען...</span>
+                            <span id="mobile-user-role" class="user-role" style="font-size: 0.72rem; color: var(--text-secondary);">לקוח</span>
+                        </div>
+                    </div>
+                    <nav class="mobile-drawer-nav" id="mobile-drawer-navigation">
+                        <!-- ימולא דינמית על ידי JS בהתאם ל-role -->
+                    </nav>
+                    <div class="mobile-drawer-footer" style="margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05);">
+                        <button class="btn btn-danger btn-block" onclick="handleLogout(); closeMobileDrawer();" style="padding: 8px 16px; font-size: 0.85rem; border-radius: var(--radius-md);">
+                            <span class="material-icons-round">logout</span>
+                            <span>התנתק</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
