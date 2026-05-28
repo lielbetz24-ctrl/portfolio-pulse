@@ -600,11 +600,11 @@
 
                                 <div class="form-group" style="margin-top: 15px;">
                                     <label for="tip-image-file">העלאת תמונה להמלצה (אופציונלי)</label>
-                                    <div class="input-wrapper" style="padding: 14px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.12); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer;" onclick="document.getElementById('tip-image-file').click()">
-                                        <span class="material-icons-round" style="font-size: 32px; color: var(--accent-blue-start);">add_photo_alternate</span>
-                                        <span id="tip-image-filename" style="font-size: 0.8rem; color: var(--text-secondary);">בחר תמונה מהמכשיר...</span>
-                                        <input type="file" id="tip-image-file" accept="image/*" style="display: none;" onchange="handleTipImageSelect(event)">
-                                        <img id="tip-image-preview" style="max-width: 100%; max-height: 120px; border-radius: 8px; display: none; margin-top: 8px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);">
+                                    <div class="input-wrapper" style="position: relative; overflow: hidden; padding: 14px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.12); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer;">
+                                        <span class="material-icons-round" style="font-size: 32px; color: var(--accent-blue-start); pointer-events: none;">add_photo_alternate</span>
+                                        <span id="tip-image-filename" style="font-size: 0.8rem; color: var(--text-secondary); pointer-events: none;">בחר תמונה מהמכשיר...</span>
+                                        <input type="file" id="tip-image-file" accept="image/*" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10;" onchange="handleTipImageSelect(event)">
+                                        <img id="tip-image-preview" style="max-width: 100%; max-height: 120px; border-radius: 8px; display: none; margin-top: 8px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1); pointer-events: none;">
                                     </div>
                                 </div>
 
@@ -842,7 +842,7 @@
     </div>
 
     <!-- בועה צפה לשיחה והמלצות אישיות מאבי (Avi Personal Chat Bubble & Drawer) -->
-    <div id="personal-chat-widget" style="position: fixed; bottom: 30px; right: 30px; z-index: 10000; display: none; align-items: center; gap: 12px; direction: rtl;">
+    <div id="personal-chat-widget" style="position: fixed; bottom: 30px; right: 30px; z-index: 10000; display: none; align-items: center; gap: 12px; direction: rtl; touch-action: none;">
         <!-- Speech Bubble Tooltip -->
         <div id="personal-chat-tooltip" style="background: rgba(20, 25, 35, 0.95); border: 1px solid rgba(163, 52, 255, 0.3); border-radius: var(--radius-md); padding: 8px 16px; color: var(--text-primary); font-size: 0.8rem; font-weight: 500; box-shadow: var(--shadow-lg); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap;" onclick="openPersonalChatDrawer()">
              שיחה אישית עם אבי 💬

@@ -2043,3 +2043,7 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     transform: translateX(16px);
 }
 
+#personal-chat-widget {
+    touch-action: none;
+}
+

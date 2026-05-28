@@ -148,7 +148,7 @@ function initWebSocket() {
                 
                 if (currentUser.role === 'admin') {
                     // Update advisor UI if viewing that client
-                    if (activeViewingClientId === tip.target_user_id) {
+                    if (activeViewingClientId === tip.target_user_id && isChatHistoryLoaded) {
                         renderAdminClientChatHistory();
                     }
                     
@@ -163,7 +163,9 @@ function initWebSocket() {
                             t.is_read = true;
                         }
                     });
-                    renderAdminClientChatHistory();
+                    if (isChatHistoryLoaded) {
+                        renderAdminClientChatHistory();
+                    }
                 }
             } else if (msg.type === 'new_daily_ai_tips') {
                 const tips = msg.data;
@@ -236,6 +238,7 @@ let isLiveSyncing = false;
 let lastSyncTime = null;
 let isInitialPricesLoaded = false;
 let activeViewingClientId = null;
+let isChatHistoryLoaded = false;
 
 // פונקציית עזר המבצעת Fetch בעלת מנגנון נפילה רכה (Fallback) בין מספר שרתי פרוקסי CORS פומביים ויציבים!
 async function fetchWithCORS(targetUrl) {
@@ -512,7 +515,7 @@ function renderSidebarNavigation() {
                 </button>
                 <button class="nav-item" onclick="switchView('ai-tips')" id="nav-ai-tips">
                     <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
-                    <span>המלצות וטיפים מאבי</span>
+                    <span>המלצות וטיפים</span>
                 </button>
             `;
         }
@@ -543,7 +546,7 @@ function renderSidebarNavigation() {
                 </button>
                 <button class="mobile-nav-item" onclick="switchView('ai-tips')" id="mobile-nav-ai-tips">
                     <span class="material-icons-round" style="color: var(--warning-gold);">campaign</span>
-                    <span>המלצות וטיפים מאבי</span>
+                    <span>המלצות וטיפים</span>
                 </button>
             `;
         }
@@ -2294,8 +2297,9 @@ function refreshAdminCalculations() {
 }
 
 // ב. מסך צפייה בתיק לקוח ספציפי (Client Portfolio Viewer)
-function viewClientPortfolio(clientId) {
+async function viewClientPortfolio(clientId) {
     activeViewingClientId = clientId;
+    isChatHistoryLoaded = false;
     const client = allUsers.find(u => u.id === clientId);
     const portfolio = portfolios.find(p => p.user_id === clientId);
 
@@ -2392,6 +2396,15 @@ function viewClientPortfolio(clientId) {
     }
 
     // רינדור צ'אט עם הלקוח
+    try {
+        const response = await API.getTips();
+        if (response && response.tips) {
+            allTips = response.tips;
+        }
+    } catch (e) {
+        console.error('שגיאה בטעינת היסטוריית הצ\'אט מהשרת:', e);
+    }
+    isChatHistoryLoaded = true;
     renderAdminClientChatHistory();
 
     // רינדור גרף הנכסים של הלקוח
@@ -2487,18 +2500,21 @@ function renderAdminTipsList() {
     const listContainer = document.getElementById('admin-tips-list');
     const countBadge = document.getElementById('admin-tips-count');
 
-    countBadge.textContent = `${allTips.length} פעילים`;
+    // Filter out AI recommendations
+    const aviTips = allTips.filter(tip => tip.recommender !== 'ai');
+
+    countBadge.textContent = `${aviTips.length} פעילים`;
     listContainer.innerHTML = '';
 
-    if (allTips.length === 0) {
+    if (aviTips.length === 0) {
         listContainer.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px;">אין טיפים פעילים במערכת. צור טיפ חדש משמאל.</p>';
         return;
     }
 
     // מיון לפי תאריך יורד
-    allTips.sort((a,b) => new Date(b.date) - new Date(a.date));
+    aviTips.sort((a,b) => new Date(b.date) - new Date(a.date));
 
-    allTips.forEach(tip => {
+    aviTips.forEach(tip => {
         const div = document.createElement('div');
         div.className = 'tip-item';
 
@@ -2923,15 +2939,11 @@ function renderPersonalTips() {
     const unreadAviTips = aviInitiatedTips.filter(t => !t.is_read);
     
     if (chatWidget) {
-        if (aviInitiatedTips.length > 0) {
-            chatWidget.style.display = 'flex';
-            if (chatBadge) {
-                // Show unread messages count
-                chatBadge.textContent = unreadAviTips.length.toString();
-                chatBadge.style.display = unreadAviTips.length > 0 ? 'flex' : 'none';
-            }
-        } else {
-            chatWidget.style.display = 'none';
+        chatWidget.style.display = 'flex';
+        if (chatBadge) {
+            // Show unread messages count
+            chatBadge.textContent = unreadAviTips.length.toString();
+            chatBadge.style.display = unreadAviTips.length > 0 ? 'flex' : 'none';
         }
     }
     
@@ -2959,6 +2971,21 @@ function initDraggableWidget() {
     let xOffset = 0, yOffset = 0;
     let isMouseDown = false;
     let dragStarted = false;
+
+    // Load from localStorage if exists
+    const savedPosition = localStorage.getItem('personal_chat_position');
+    if (savedPosition) {
+        try {
+            const pos = JSON.parse(savedPosition);
+            if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+                xOffset = pos.x;
+                yOffset = pos.y;
+                widget.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
+            }
+        } catch (e) {
+            console.error('Failed to parse personal_chat_position', e);
+        }
+    }
 
     widget.style.transition = 'none'; // Prevent lag during dragging
 
@@ -3018,6 +3045,9 @@ function initDraggableWidget() {
 
     function dragEnd() {
         isMouseDown = false;
+        if (dragStarted) {
+            localStorage.setItem('personal_chat_position', JSON.stringify({ x: xOffset, y: yOffset }));
+        }
         // Keep dragging flag true slightly longer to block click triggers
         setTimeout(() => {
             isWidgetDragging = false;
