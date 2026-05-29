@@ -20,28 +20,9 @@ console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW con
 
 // Register background message interception synchronously
 messaging.onBackgroundMessage((payload) => {
-  console.log('⭐⭐⭐ [Firebase SW] Intercepted background push message (Data-Only): ', payload);
-  
-  if (!payload || !payload.data) {
-    console.warn('[Firebase SW] Push message payload has no data property. Skipping notification.');
-    return;
-  }
-  
-  const notificationTitle = payload.data.title || 'עדכון חדש';
-  const notificationBody = payload.data.body || '';
-  const notificationIcon = payload.data.icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png';
-  
-  const options = {
-    body: notificationBody,
-    icon: notificationIcon,
-    badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-    vibrate: [100, 50, 100],
-    data: {
-      url: '/'
-    }
-  };
-
-  return self.registration.showNotification(notificationTitle, options);
+  console.log('⭐⭐⭐ [Firebase SW] Intercepted background push message (WebPush Native): ', payload);
+  // Manual showNotification call removed to prevent duplicate notifications.
+  // The Native WebPush protocol automatically handles rendering at the OS/Browser level.
 });
 
 // Handle notification click to focus active PWA or WebView window

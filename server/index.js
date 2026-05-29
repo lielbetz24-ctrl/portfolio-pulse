@@ -247,17 +247,16 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
       const payload = {
         message: {
           token: token,
-          data: {
-            title: String(title || ''),
-            body: String(body || ''),
-            icon: String(icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png')
-          },
-          android: {
-            priority: "high"
-          },
           webpush: {
             headers: {
               "Urgency": "high"
+            },
+            notification: {
+              title: title,
+              body: body,
+              icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+              badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+              click_action: "https://portfolio-pulse-mux5.onrender.com/"
             }
           }
         }
