@@ -2816,7 +2816,18 @@ function showToast(message, type = 'info') {
 /* ==================== 10. התראות דחיפה פרימיום & טיפים אישיים ==================== */
 
 function restoreNotificationSettings() {
-    const mainEnabled = localStorage.getItem('push_notifications_enabled') === 'true';
+    let mainEnabled = localStorage.getItem('push_notifications_enabled') === 'true';
+    
+    // Check actual browser permission status to sync toggle correctly
+    if (window.Notification) {
+        if (Notification.permission === 'denied') {
+            mainEnabled = false;
+            localStorage.setItem('push_notifications_enabled', 'false');
+        } else if (Notification.permission === 'granted') {
+            mainEnabled = true;
+            localStorage.setItem('push_notifications_enabled', 'true');
+        }
+    }
     
     // Sync main toggles
     const sidebarToggle = document.getElementById('push-toggle-sidebar');
@@ -2874,79 +2885,92 @@ function togglePushSubscription(event) {
     const mobilePrefs = document.getElementById('push-preferences-mobile');
 
     if (isEnabled) {
-        // Error handling for lack of push support (iOS PWA verification)
-        if (!('Notification' in window) || !('serviceWorker' in navigator)) {
-            showToast('התראות אינן נתמכות בדפדפן זה – אנא הוסף את האפליקציה למסך הבית דרך תפריט השיתוף של iOS', 'error');
+        // 1. Direct permission denied check
+        if (window.Notification && Notification.permission === 'denied') {
+            alert('ההתראות חסומות ברמת הדפדפן או מערכת ההפעלה. יש לאפשר אותן ידנית בהגדרות הדפדפן/אתר במכשיר זה על מנת לקבל התראות.');
             if (sidebarToggle) sidebarToggle.checked = false;
             if (mobileToggle) mobileToggle.checked = false;
             return;
         }
 
+        // 2. Browser support check
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+            const supportError = 'התראות אינן נתמכות בדפדפן זה – אנא ודא שאתה גולש ב-Chrome/Safari, וב-iOS הוסף את האפליקציה למסך הבית דרך תפריט השיתוף.';
+            alert(supportError);
+            if (sidebarToggle) sidebarToggle.checked = false;
+            if (mobileToggle) mobileToggle.checked = false;
+            return;
+        }
+
+        // 3. Request permission and retrieve token in try/catch block
         Notification.requestPermission().then(async permission => {
             if (permission === 'granted') {
-                showToast('התראות דחיפה הופעלו בהצלחה בדפנפן!', 'success');
-                localStorage.setItem('push_notifications_enabled', 'true');
+                showToast('הרשאת התראות אושרה! מתחבר לשרת ההתראות...', 'info');
                 
-                // Register Service Worker and connect to Firebase ONLY after granted status!
-                if ('serviceWorker' in navigator) {
-                    try {
-                        const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                        console.log('Firebase Service Worker registered successfully after permission granted:', reg.scope);
-                        reg.update();
+                try {
+                    // Register the Firebase Service Worker
+                    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                    console.log('Firebase Service Worker registered successfully after permission granted:', reg.scope);
+                    reg.update();
 
-                        if (!messaging) {
-                            await initFirebase();
-                        }
-
-                        if (messaging) {
-                            const fcmToken = await messaging.getToken({ 
-                                serviceWorkerRegistration: reg,
-                                vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
-                            });
-                            console.log('[FCM Client] Token successfully retrieved:', fcmToken);
-
-                            // Sync subscription on backend
-                            await API.request('POST', '/api/notifications/subscribe', {
-                                fcm_token: fcmToken
-                            });
-                        } else {
-                            throw new Error('FCM messaging SDK not initialized');
-                        }
-                    } catch (err) {
-                        console.warn('[FCM Client] Subscription failed, falling back to mock registration:', err);
-                        // Fallback/Mock registration sync
-                        const mockToken = 'mock-fcm-token-' + currentUser.id;
-                        await API.request('POST', '/api/notifications/subscribe', {
-                            fcm_token: mockToken
-                        }).catch(e => console.error('Mock FCM subscription sync failed:', e));
+                    // Initialize Firebase SDK
+                    if (!messaging) {
+                        await initFirebase();
                     }
-                }
-                
-                // Default categories if not set
-                if (localStorage.getItem('push_ai_enabled') === null) localStorage.setItem('push_ai_enabled', 'true');
-                if (localStorage.getItem('push_community_enabled') === null) localStorage.setItem('push_community_enabled', 'true');
-                if (localStorage.getItem('push_personal_enabled') === null) localStorage.setItem('push_personal_enabled', 'true');
 
-                // Show fine-grained preferences
-                if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
-                if (mobilePrefs) mobilePrefs.style.display = 'flex';
-                
-                // Sync fine-grained checkboxes with localStorage values
-                syncPushPreferenceCheckboxes();
+                    if (messaging) {
+                        // Retrieve the native FCM Token
+                        const fcmToken = await messaging.getToken({ 
+                            serviceWorkerRegistration: reg,
+                            vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
+                        });
+                        
+                        console.log('[FCM Client] Token successfully retrieved:', fcmToken);
+
+                        // Save token in DB immediately!
+                        await API.request('POST', '/api/notifications/subscribe', {
+                            fcm_token: fcmToken
+                        });
+
+                        localStorage.setItem('push_notifications_enabled', 'true');
+                        showToast('התראות דחיפה הופעלו בהצלחה במכשיר זה!', 'success');
+
+                        // Show fine-grained preferences
+                        if (sidebarPrefs) sidebarPrefs.style.display = 'flex';
+                        if (mobilePrefs) mobilePrefs.style.display = 'flex';
+                        syncPushPreferenceCheckboxes();
+                    } else {
+                        throw new Error('הגדרות פרויקט Firebase חסרות בשרת או שה-SDK לא הצליח להיטען.');
+                    }
+                } catch (err) {
+                    const errMsg = `שגיאת התראות: ${err.message || err}`;
+                    console.error('[FCM Client] Registration failed:', err);
+                    alert(errMsg); // Critical alert for WebView / permission debug
+                    
+                    if (sidebarToggle) sidebarToggle.checked = false;
+                    if (mobileToggle) mobileToggle.checked = false;
+                    localStorage.setItem('push_notifications_enabled', 'false');
+                    if (sidebarPrefs) sidebarPrefs.style.display = 'none';
+                    if (mobilePrefs) mobilePrefs.style.display = 'none';
+                }
             } else {
-                showToast('הרשאת התראות נדחתה על ידי הדפדפן.', 'error');
+                alert('הרשאת התראות נדחתה על ידי המשתמש/דפדפן.');
                 if (sidebarToggle) sidebarToggle.checked = false;
                 if (mobileToggle) mobileToggle.checked = false;
                 localStorage.setItem('push_notifications_enabled', 'false');
                 if (sidebarPrefs) sidebarPrefs.style.display = 'none';
                 if (mobilePrefs) mobilePrefs.style.display = 'none';
             }
+        }).catch(err => {
+            alert(`שגיאה בבקשת הרשאה: ${err.message || err}`);
+            if (sidebarToggle) sidebarToggle.checked = false;
+            if (mobileToggle) mobileToggle.checked = false;
         });
     } else {
         localStorage.setItem('push_notifications_enabled', 'false');
         if (sidebarPrefs) sidebarPrefs.style.display = 'none';
         if (mobilePrefs) mobilePrefs.style.display = 'none';
-        showToast('התראות דחיפה כובו.', 'info');
+        showToast('התראות דחיפה כובו במכשיר זה.', 'info');
     }
 }
 

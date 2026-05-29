@@ -1106,7 +1106,7 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
-  if (pathname === '/api/notifications/subscribe' && req.method === 'POST') {
+  if ((pathname === '/api/notifications/subscribe' || pathname === '/api/save-fcm-token') && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
     const { fcm_token } = body;
