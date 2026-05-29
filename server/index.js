@@ -4,6 +4,112 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
+const { Pool } = require('pg');
+
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/portfolio_pulse';
+const pool = new Pool({
+  connectionString,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
+let isPgActive = false;
+
+async function initDb() {
+  try {
+    console.log('[Database] Connecting to PostgreSQL...');
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+    
+    console.log('[Database] PostgreSQL connection successful! Running in PostgreSQL mode.');
+    isPgActive = true;
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client')),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS portfolios (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        cash_balance DECIMAL(15, 4) DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS transactions (
+        id VARCHAR(50) PRIMARY KEY,
+        portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
+        ticker VARCHAR(20),
+        action_type VARCHAR(20) NOT NULL CHECK (action_type IN ('buy', 'sell', 'deposit', 'withdraw', 'holding')),
+        quantity DECIMAL(15, 6) DEFAULT 0,
+        price DECIMAL(15, 4) DEFAULT 0,
+        transaction_date TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_by_user_id VARCHAR(50) REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS tips (
+        id VARCHAR(50) PRIMARY KEY,
+        ticker VARCHAR(20),
+        content TEXT NOT NULL,
+        recommender VARCHAR(20) NOT NULL,
+        target_user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        image_url VARCHAR(255),
+        date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        is_read BOOLEAN DEFAULT FALSE
+      );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS notification_reads (
+        id SERIAL PRIMARY KEY,
+        notification_id VARCHAR(50) REFERENCES notifications(id) ON DELETE CASCADE,
+        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(notification_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        fcm_token TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[Database] Database tables initialized successfully!');
+    
+    // Seed admin if not present
+    const res = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
+    if (res.rows.length === 0) {
+      console.log('[Database] Seeding default admin user...');
+      const adminId = 'u_admin_avi';
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = crypto.scryptSync('AVIm76543', salt, 64).toString('hex');
+      const passwordHash = `${salt}:${hash}`;
+      await pool.query(
+        'INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)',
+        [adminId, 'אבי', 'aviariel91@gmail.com', passwordHash, 'admin']
+      );
+      console.log('[Database] Seeding completed.');
+    }
+  } catch (err) {
+    console.warn('[Database Warning] PostgreSQL connection failed. Falling back to JSON database mode (data/db.json). Reason:', err.message);
+    isPgActive = false;
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -771,143 +877,362 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/auth/register' && req.method === 'POST') {
     const body = await readBody(req);
-    const { name, email, password } = body;
-    if (!name || !email || !password) return sendJson(res, 400, { error: 'נא למלא שם, אימייל וסיסמה' });
-    if (password.length < 6) return sendJson(res, 400, { error: 'סיסמה חייבת להכיל לפחות 6 תווים' });
-    const db = readDb();
-    const em = email.trim().toLowerCase();
-    if (db.users.some(u => u.email === em)) return sendJson(res, 409, { error: 'כתובת האימייל כבר רשומה במערכת' });
-    const userRole = resolveRoleByEmail(em);
-    const id = uid('u');
-    db.users.push({ id, name: name.trim(), email: em, password_hash: hashPassword(password), role: userRole, is_active: true, created_at: new Date().toISOString() });
-    if (userRole === 'client') {
-      db.portfolios.push({ id: uid('p'), user_id: id, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() });
+    const em = (body.email || '').trim().toLowerCase();
+    const name = body.name || '';
+    const password = body.password || '';
+    
+    if (!em || !name || !password) {
+      return sendJson(res, 400, { error: 'נא למלא את כל שדות החובה' });
     }
-    writeDb(db);
-    const u = publicUser(db.users.find(x => x.id === id));
-    return sendJson(res, 201, { user: u, token: signToken(u) });
+    
+    const userRole = resolveRoleByEmail(em);
+    const id = uid('u_' + userRole);
+    
+    if (isPgActive) {
+      try {
+        const userCheck = await pool.query('SELECT * FROM users WHERE email = $1', [em]);
+        if (userCheck.rows.length > 0) {
+          return sendJson(res, 409, { error: 'כתובת האימייל כבר רשומה במערכת' });
+        }
+        
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            'INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)',
+            [id, name.trim(), em, hashPassword(password), userRole]
+          );
+          const pId = uid('p');
+          await client.query(
+            'INSERT INTO portfolios (id, user_id, name, cash_balance) VALUES ($1, $2, $3, $4)',
+            [pId, id, 'תיק השקעות אישי', 0]
+          );
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        } finally {
+          client.release();
+        }
+        
+        const u = { id, name: name.trim(), email: em, role: userRole };
+        return sendJson(res, 201, { user: u, token: signToken(u) });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      // Fallback JSON db register
+      const db = readDb();
+      if (db.users.some(u => u.email === em)) {
+        return sendJson(res, 409, { error: 'כתובת האימייל כבר רשומה במערכת' });
+      }
+      
+      const newUser = {
+        id,
+        name: name.trim(),
+        email: em,
+        password_hash: hashPassword(password),
+        role: userRole,
+        is_active: true,
+        created_at: new Date().toISOString()
+      };
+      db.users.push(newUser);
+      
+      const newPortfolio = {
+        id: uid('p'),
+        user_id: id,
+        name: 'תיק השקעות אישי',
+        cash_balance: 0,
+        created_at: new Date().toISOString()
+      };
+      db.portfolios.push(newPortfolio);
+      
+      writeDb(db);
+      
+      const u = publicUser(newUser);
+      return sendJson(res, 201, { user: u, token: signToken(u) });
+    }
   }
 
   if (pathname === '/api/auth/login' && req.method === 'POST') {
     const body = await readBody(req);
-    const db = readDb();
-    const row = db.users.find(u => u.email === (body.email || '').trim().toLowerCase() && u.is_active);
-    if (!row || !verifyPassword(body.password || '', row.password_hash)) {
-      return sendJson(res, 401, { error: 'אימייל או סיסמה שגויים' });
+    const em = (body.email || '').trim().toLowerCase();
+    
+    if (isPgActive) {
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = true', [em]);
+        const row = userRes.rows[0];
+        if (!row || !verifyPassword(body.password || '', row.password_hash)) {
+          return sendJson(res, 401, { error: 'אימייל או סיסמה שגויים' });
+        }
+        const u = publicUser(row);
+        return sendJson(res, 200, { user: u, token: signToken(u) });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      const row = db.users.find(u => u.email === em && u.is_active);
+      if (!row || !verifyPassword(body.password || '', row.password_hash)) {
+        return sendJson(res, 401, { error: 'אימייל או סיסמה שגויים' });
+      }
+      const u = publicUser(row);
+      return sendJson(res, 200, { user: u, token: signToken(u) });
     }
-    const u = publicUser(row);
-    return sendJson(res, 200, { user: u, token: signToken(u) });
   }
 
   if (pathname === '/api/auth/me' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    const row = db.users.find(u => u.id === user.id);
-    if (!row) return sendJson(res, 401, { error: 'משתמש לא נמצא' });
-    return sendJson(res, 200, { user: publicUser(row) });
+    
+    if (isPgActive) {
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [user.id]);
+        const row = userRes.rows[0];
+        if (!row) return sendJson(res, 401, { error: 'משתמש לא נמצא' });
+        return sendJson(res, 200, { user: publicUser(row) });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      const row = db.users.find(u => u.id === user.id);
+      if (!row) return sendJson(res, 401, { error: 'משתמש לא נמצא' });
+      return sendJson(res, 200, { user: publicUser(row) });
+    }
   }
 
   if (pathname === '/api/sync' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    await generateDailyAITips(db);
-    const tips = db.tips.map(t => ({
-      id: t.id,
-      advisor_id: t.advisor_id,
-      recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'),
-      ticker: t.ticker,
-      content: t.content,
-      target_user_id: t.target_user_id || null,
-      is_read: t.is_read || false,
-      created_at: t.created_at || null,
-      timestamp: t.timestamp || null,
-      image_url: t.image_url || null,
-      date: t.date || t.created_at?.split('T')[0]
-    }));
     
-    // Compile current cached prices from PRICE_CACHE
-    const prices = {};
-    for (const ticker in PRICE_CACHE) {
-      prices[ticker] = PRICE_CACHE[ticker].data;
-    }
+    if (isPgActive) {
+      try {
+        let portfolios = [];
+        let transactions = [];
+        let tips = [];
+        let clients = [];
+        
+        if (user.role === 'admin') {
+          const clientsRes = await pool.query('SELECT id, name, email, role FROM users WHERE role = $1 AND is_active = true', ['client']);
+          clients = clientsRes.rows;
+          
+          const portfoliosRes = await pool.query('SELECT * FROM portfolios');
+          portfolios = portfoliosRes.rows;
+          
+          const transactionsRes = await pool.query('SELECT * FROM transactions');
+          transactions = transactionsRes.rows;
+          
+          const tipsRes = await pool.query('SELECT * FROM tips');
+          tips = tipsRes.rows;
+        } else {
+          const portfoliosRes = await pool.query('SELECT * FROM portfolios WHERE user_id = $1', [user.id]);
+          portfolios = portfoliosRes.rows;
+          
+          if (portfolios.length === 0) {
+            const pId = uid('p');
+            const pName = 'תיק השקעות אישי';
+            await pool.query(
+              'INSERT INTO portfolios (id, user_id, name, cash_balance) VALUES ($1, $2, $3, $4)',
+              [pId, user.id, pName, 0]
+            );
+            portfolios = [{ id: pId, user_id: user.id, name: pName, cash_balance: 0 }];
+          }
+          
+          const pIds = portfolios.map(p => p.id);
+          const transactionsRes = await pool.query(
+            'SELECT * FROM transactions WHERE portfolio_id = ANY($1)',
+            [pIds]
+          );
+          transactions = transactionsRes.rows;
+          
+          const tipsRes = await pool.query(
+            'SELECT * FROM tips WHERE target_user_id IS NULL OR target_user_id = $1',
+            [user.id]
+          );
+          tips = tipsRes.rows;
+        }
+        
+        const tipsMapped = tips.map(t => ({
+          id: t.id,
+          ticker: t.ticker,
+          content: t.content,
+          recommender: t.recommender,
+          target_user_id: t.target_user_id,
+          is_read: t.is_read || false,
+          image_url: t.image_url,
+          date: t.date ? new Date(t.date).toISOString().split('T')[0] : null
+        }));
+        
+        const prices = { ...PRICE_CACHE };
+        return sendJson(res, 200, {
+          portfolios,
+          transactions,
+          tips: tipsMapped,
+          clients,
+          prices
+        });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      await generateDailyAITips(db);
+      const tips = db.tips.map(t => ({
+        id: t.id,
+        advisor_id: t.advisor_id,
+        recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'),
+        ticker: t.ticker,
+        content: t.content,
+        target_user_id: t.target_user_id || null,
+        is_read: t.is_read || false,
+        created_at: t.created_at || null,
+        timestamp: t.timestamp || null,
+        image_url: t.image_url || null,
+        date: t.date || t.created_at?.split('T')[0]
+      }));
+      
+      const prices = {};
+      for (const ticker in PRICE_CACHE) {
+        prices[ticker] = PRICE_CACHE[ticker].data;
+      }
 
-    if (user.role === 'admin') {
-      return sendJson(res, 200, {
-        portfolios: db.portfolios,
-        transactions: db.transactions,
-        tips,
-        clients: db.users.filter(u => u.role === 'client' && u.is_active).map(publicUser),
-        prices
-      });
+      if (user.role === 'admin') {
+        return sendJson(res, 200, {
+          portfolios: db.portfolios,
+          transactions: db.transactions,
+          tips,
+          clients: db.users.filter(u => u.role === 'client' && u.is_active).map(publicUser),
+          prices
+        });
+      }
+      let portfolios = db.portfolios.filter(p => p.user_id === user.id);
+      if (portfolios.length === 0) {
+        const p = { id: uid('p'), user_id: user.id, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() };
+        db.portfolios.push(p);
+        writeDb(db);
+        portfolios = [p];
+      }
+      const ids = portfolios.map(p => p.id);
+      const transactions = db.transactions.filter(t => ids.includes(t.portfolio_id));
+      return sendJson(res, 200, { portfolios, transactions, tips, clients: [], prices });
     }
-    let portfolios = db.portfolios.filter(p => p.user_id === user.id);
-    if (portfolios.length === 0) {
-      const p = { id: uid('p'), user_id: user.id, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() };
-      db.portfolios.push(p);
-      writeDb(db);
-      portfolios = [p];
-    }
-    const ids = portfolios.map(p => p.id);
-    const transactions = db.transactions.filter(t => ids.includes(t.portfolio_id));
-    return sendJson(res, 200, { portfolios, transactions, tips, clients: [], prices });
   }
 
   if (pathname === '/api/transactions' && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
-    const db = readDb();
-    const portfolio = db.portfolios.find(p => p.id === body.portfolio_id);
-    if (!portfolio) return sendJson(res, 404, { error: 'תיק לא נמצא' });
-    if (user.role === 'client' && portfolio.user_id !== user.id) return sendJson(res, 403, { error: 'אין הרשאה לתיק זה' });
     
-    const actionType = body.action_type;
-    const price = parseFloat(body.price || 0);
-    const qty = parseFloat(body.quantity || 0);
-    
-    // Strict Cash Validation & Deduction for BUY
-    if (actionType === 'buy') {
-      const totalCost = qty * price;
-      if ((portfolio.cash_balance || 0) < totalCost) {
-        return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו' });
+    if (isPgActive) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const portRes = await client.query('SELECT * FROM portfolios WHERE id = $1 FOR UPDATE', [body.portfolio_id]);
+        const portfolio = portRes.rows[0];
+        
+        if (!portfolio) {
+          client.release();
+          return sendJson(res, 404, { error: 'תיק לא נמצא' });
+        }
+        if (user.role === 'client' && portfolio.user_id !== user.id) {
+          await client.query('ROLLBACK');
+          client.release();
+          return sendJson(res, 403, { error: 'אין הרשאה לתיק זה' });
+        }
+        
+        const actionType = body.action_type;
+        const price = parseFloat(body.price || 0);
+        const qty = parseFloat(body.quantity || 0);
+        let cash = parseFloat(portfolio.cash_balance || 0);
+        
+        if (actionType === 'buy') {
+          const cost = qty * price;
+          if (cash < cost) {
+            await client.query('ROLLBACK');
+            client.release();
+            return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו' });
+          }
+          cash -= cost;
+        } else if (actionType === 'withdraw') {
+          if (cash < price) {
+            await client.query('ROLLBACK');
+            client.release();
+            return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו' });
+          }
+          cash -= price;
+        } else if (actionType === 'deposit') {
+          cash += price;
+        } else if (actionType === 'sell') {
+          cash += qty * price;
+        }
+        
+        await client.query('UPDATE portfolios SET cash_balance = $1 WHERE id = $2', [cash, portfolio.id]);
+        
+        const tx = {
+          id: uid('tx'),
+          portfolio_id: body.portfolio_id,
+          ticker: body.ticker || null,
+          action_type: actionType,
+          quantity: qty,
+          price: price,
+          transaction_date: body.transaction_date || new Date().toISOString(),
+          created_by_user_id: user.id
+        };
+        
+        await client.query(`
+          INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [tx.id, tx.portfolio_id, tx.ticker, tx.action_type, tx.quantity, tx.price, tx.transaction_date, tx.created_by_user_id]);
+        
+        await client.query('COMMIT');
+        client.release();
+        return sendJson(res, 201, { transaction: tx });
+      } catch (e) {
+        await client.query('ROLLBACK');
+        client.release();
+        return sendJson(res, 500, { error: e.message });
       }
-      portfolio.cash_balance = (portfolio.cash_balance || 0) - totalCost;
-    }
-    
-    // Strict Cash Validation & Deduction for WITHDRAW
-    else if (actionType === 'withdraw') {
-      if ((portfolio.cash_balance || 0) < price) {
-        return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו' });
+    } else {
+      const db = readDb();
+      const portfolio = db.portfolios.find(p => p.id === body.portfolio_id);
+      if (!portfolio) return sendJson(res, 404, { error: 'תיק לא נמצא' });
+      if (user.role === 'client' && portfolio.user_id !== user.id) return sendJson(res, 403, { error: 'אין הרשאה לתיק זה' });
+      
+      const actionType = body.action_type;
+      const price = parseFloat(body.price || 0);
+      const qty = parseFloat(body.quantity || 0);
+      
+      if (actionType === 'buy') {
+        const totalCost = qty * price;
+        if ((portfolio.cash_balance || 0) < totalCost) {
+          return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו' });
+        }
+        portfolio.cash_balance = (portfolio.cash_balance || 0) - totalCost;
+      } else if (actionType === 'withdraw') {
+        if ((portfolio.cash_balance || 0) < price) {
+          return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו' });
+        }
+        portfolio.cash_balance = (portfolio.cash_balance || 0) - price;
+      } else if (actionType === 'deposit') {
+        portfolio.cash_balance = (portfolio.cash_balance || 0) + price;
+      } else if (actionType === 'sell') {
+        const totalGain = qty * price;
+        portfolio.cash_balance = (portfolio.cash_balance || 0) + totalGain;
       }
-      portfolio.cash_balance = (portfolio.cash_balance || 0) - price;
+      
+      const tx = {
+        id: uid('tx'),
+        portfolio_id: body.portfolio_id,
+        ticker: body.ticker || null,
+        action_type: actionType,
+        quantity: qty,
+        price: price,
+        transaction_date: body.transaction_date || new Date().toISOString(),
+        created_by_user_id: user.id
+      };
+      
+      db.transactions.push(tx);
+      writeDb(db);
+      return sendJson(res, 201, { transaction: tx });
     }
-    
-    // Add cash on DEPOSIT
-    else if (actionType === 'deposit') {
-      portfolio.cash_balance = (portfolio.cash_balance || 0) + price;
-    }
-    
-    // Add cash on SELL
-    else if (actionType === 'sell') {
-      const totalGain = qty * price;
-      portfolio.cash_balance = (portfolio.cash_balance || 0) + totalGain;
-    }
-    
-    // For actionType === 'holding', it does not affect cash balance (tracking only).
-    
-    const tx = {
-      id: uid('tx'),
-      portfolio_id: body.portfolio_id,
-      ticker: body.ticker || null,
-      action_type: actionType,
-      quantity: qty,
-      price: price,
-      transaction_date: body.transaction_date || new Date().toISOString(),
-      created_by_user_id: user.id
-    };
-    
-    db.transactions.push(tx);
-    writeDb(db);
-    return sendJson(res, 201, { transaction: tx });
   }
 
   if (pathname === '/api/upload' && req.method === 'POST') {
@@ -919,7 +1244,7 @@ async function handleApi(req, res, pathname, query) {
       const uploadsDir = path.join(PUBLIC, 'uploads');
       fs.mkdirSync(uploadsDir, { recursive: true });
       
-      const base64Data = body.image.replace(/^data:image\/\w+;base64,/, "");
+      const base64Data = body.image.replace(/^data:image\/\w+;base64,/, '');
       const buffer = Buffer.from(base64Data, 'base64');
       const filename = `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
       const filePath = path.join(uploadsDir, filename);
@@ -927,64 +1252,80 @@ async function handleApi(req, res, pathname, query) {
       fs.writeFileSync(filePath, buffer);
       return sendJson(res, 200, { url: `/uploads/${filename}` });
     } catch (e) {
-      return sendJson(res, 500, { error: e.message });
+      return sendJson(res, 500, { error: 'שגיאה בעיבוד התמונה' });
     }
   }
 
   if ((pathname === '/api/tips' || pathname === '/api/recommendations') && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    await generateDailyAITips(db);
-    const tips = db.tips.map(t => ({ 
-      id: t.id, 
-      advisor_id: t.advisor_id, 
-      recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), 
-      ticker: t.ticker, 
-      content: t.content, 
-      target_user_id: t.target_user_id || null,
-      is_read: t.is_read || false,
-      created_at: t.created_at || null,
-      timestamp: t.timestamp || null,
-      image_url: t.image_url || null,
-      date: t.date || t.created_at?.split('T')[0] 
-    }));
-    return sendJson(res, 200, { tips });
+    
+    if (isPgActive) {
+      try {
+        let tips = [];
+        if (user.role === 'admin') {
+          const tipsRes = await pool.query('SELECT * FROM tips');
+          tips = tipsRes.rows;
+        } else {
+          const tipsRes = await pool.query(
+            'SELECT * FROM tips WHERE target_user_id IS NULL OR target_user_id = $1',
+            [user.id]
+          );
+          tips = tipsRes.rows;
+        }
+        
+        const tipsMapped = tips.map(t => ({
+          id: t.id,
+          ticker: t.ticker,
+          content: t.content,
+          recommender: t.recommender,
+          target_user_id: t.target_user_id,
+          is_read: t.is_read || false,
+          image_url: t.image_url,
+          date: t.date ? new Date(t.date).toISOString().split('T')[0] : null
+        }));
+        
+        return sendJson(res, 200, { tips: tipsMapped });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      const tips = db.tips.map(t => ({ 
+        id: t.id, 
+        advisor_id: t.advisor_id, 
+        recommender: t.recommender || (t.id === 't5' || t.id === 't6' ? 'ai' : 'avi'), 
+        ticker: t.ticker, 
+        content: t.content, 
+        target_user_id: t.target_user_id || null,
+        is_read: t.is_read || false,
+        created_at: t.created_at || null,
+        timestamp: t.timestamp || null,
+        image_url: t.image_url || null,
+        date: t.date || t.created_at?.split('T')[0] 
+      }));
+      return sendJson(res, 200, { tips });
+    }
   }
 
   if ((pathname === '/api/tips' || pathname === '/api/recommendations') && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
-    if (!body.content?.trim()) return sendJson(res, 400, { error: 'נא להזין תוכן להמלצה' });
+    
+    if (!body.content?.trim()) {
+      return sendJson(res, 400, { error: 'נא להזין תוכן להמלצה' });
+    }
     
     const isClientMessage = body.recommender === 'client';
     if (user.role !== 'admin' && !isClientMessage) {
       return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
     }
-    
-    // Ensure client can only message/reply to themselves
     if (user.role === 'client' && body.target_user_id !== user.id) {
       return sendJson(res, 403, { error: 'אין הרשאה לשלוח הודעה למשתמש אחר' });
     }
-
+    
     const targetUserId = body.target_user_id || null;
-
-    const db = readDb();
-    const tip = {
-      id: uid('t'),
-      advisor_id: user.role === 'admin' ? user.id : 'u_admin_avi',
-      recommender: body.recommender || 'avi',
-      ticker: body.ticker ? body.ticker.toUpperCase() : null,
-      content: body.content.trim(),
-      target_user_id: targetUserId,
-      is_read: false,
-      created_at: new Date().toISOString(),
-      timestamp: Date.now(),
-      image_url: body.image_url || null,
-      date: new Date().toISOString().split('T')[0]
-    };
-    db.tips.push(tip);
-
-    // Trigger push notification by category
+    const dateStr = new Date().toISOString();
+    
     let notifTitle = '';
     let notifBody = '';
     let targetUser = targetUserId;
@@ -992,7 +1333,7 @@ async function handleApi(req, res, pathname, query) {
     if (body.recommender === 'client') {
       notifTitle = `התקבלה הודעה חדשה מ-${user.name}`;
       notifBody = body.content.trim();
-      targetUser = 'u_admin_avi'; // Send notification to Avi
+      targetUser = 'u_admin_avi';
     } else if (targetUserId) {
       notifTitle = 'הודעה אישית מאבי';
       notifBody = 'התקבלה המלצה חדשה המותאמת אישית לתיק ההשקעות שלך. לחץ לצפייה.';
@@ -1000,108 +1341,151 @@ async function handleApi(req, res, pathname, query) {
       notifTitle = 'עדכון חדש בקהילה';
       notifBody = 'התקבלה המלצה חדשה בקהילת ההשקעות';
     }
-
-    const newNotif = {
-      id: uid('nt'),
-      user_id: targetUser,
-      title: notifTitle,
-      body: notifBody,
-      created_at: new Date().toISOString(),
-      read_by: []
-    };
-    db.notifications = db.notifications || [];
-    db.notifications.push(newNotif);
-
-    writeDb(db);
-
-    // Trigger Firebase Cloud Messaging Notification asynchronously
-    triggerFcmNotification(db, targetUser, notifTitle, notifBody)
-      .catch(err => console.error('[FCM Trigger] Async FCM notification error:', err));
-
-    // Dynamic real-time WebSockets event triggering
-    if (body.recommender === 'client') {
-      // Broadcast reply to Admin Avi
-      sendWebSocketMessage('u_admin_avi', {
-        type: 'new_message_to_advisor',
-        data: {
-          ...tip,
-          sender_name: user.name
+    
+    if (isPgActive) {
+      try {
+        const tipId = uid('tip');
+        await pool.query(`
+          INSERT INTO tips (id, ticker, content, recommender, target_user_id, image_url, date, is_read)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [
+          tipId,
+          body.ticker ? body.ticker.toUpperCase() : null,
+          body.content.trim(),
+          body.recommender || 'avi',
+          targetUserId,
+          body.image_url || null,
+          dateStr,
+          false
+        ]);
+        
+        const newTip = {
+          id: tipId,
+          ticker: body.ticker || null,
+          content: body.content.trim(),
+          recommender: body.recommender || 'avi',
+          target_user_id: targetUserId,
+          image_url: body.image_url || null,
+          date: dateStr.split('T')[0]
+        };
+        
+        // Auto Push Notifications logic
+        if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+          try {
+            const notifId = uid('notif');
+            await pool.query(`
+              INSERT INTO notifications (id, user_id, title, body, created_at)
+              VALUES ($1, $2, $3, $4, $5)
+            `, [notifId, targetUser, notifTitle, notifBody, dateStr]);
+            
+            let targets = [];
+            if (targetUser) {
+              const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id = $1', [targetUser]);
+              targets = subRes.rows;
+            } else {
+              const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id != $1', ['u_admin_avi']);
+              targets = subRes.rows;
+            }
+            
+            for (const s of targets) {
+              sendFcmNotification(s.fcm_token, notifTitle, notifBody, '/icons/icon-192x192.png')
+                .then(res => {
+                  if (res.invalidToken) {
+                    pool.query('DELETE FROM subscriptions WHERE id = $1', [s.id]).catch(() => {});
+                  }
+                }).catch(() => {});
+            }
+          } catch (pushErr) {
+            console.error('[Push Error] Failed to send automated tip push:', pushErr.message);
+          }
         }
-      });
+        
+        return sendJson(res, 201, { tip: newTip });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
     } else {
-      // Advisor recommendation
-      if (targetUserId) {
-        // Direct personal tip to a single client
-        sendWebSocketMessage(targetUserId, {
-          type: 'new_message_to_client',
-          data: tip
-        });
-      } else {
-        // Public community tip to all connected users
-        for (const uid of activeSockets.keys()) {
-          sendWebSocketMessage(uid, {
-            type: 'new_message_to_client',
-            data: tip
-          });
+      const db = readDb();
+      const tip = {
+        id: uid('t'),
+        advisor_id: user.role === 'admin' ? user.id : 'u_admin_avi',
+        recommender: body.recommender || 'avi',
+        ticker: body.ticker ? body.ticker.toUpperCase() : null,
+        content: body.content.trim(),
+        target_user_id: targetUserId,
+        is_read: false,
+        created_at: dateStr,
+        timestamp: Date.now(),
+        image_url: body.image_url || null,
+        date: dateStr.split('T')[0]
+      };
+      db.tips.push(tip);
+      writeDb(db);
+      
+      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        try {
+          const newNotif = {
+            id: uid('nt'),
+            user_id: targetUser,
+            title: notifTitle,
+            body: notifBody,
+            created_at: dateStr,
+            read_by: []
+          };
+          db.notifications = db.notifications || [];
+          db.notifications.push(newNotif);
+          writeDb(db);
+          
+          let targets = [];
+          if (targetUser) {
+            targets = db.subscriptions.filter(s => s.user_id === targetUser);
+          } else {
+            targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
+          }
+          
+          for (const s of targets) {
+            sendFcmNotification(s.fcm_token, newNotif.title, newNotif.body, '/icons/icon-192x192.png')
+              .then(res => {
+                if (res.invalidToken) {
+                  const innerDb = readDb();
+                  innerDb.subscriptions = innerDb.subscriptions.filter(x => x.id !== s.id);
+                  writeDb(innerDb);
+                }
+              }).catch(() => {});
+          }
+        } catch (pushErr) {
+          console.error('[Push Error] Failed to send automated tip push:', pushErr.message);
         }
       }
-    }
-
-    return sendJson(res, 201, { tip });
-  }
-
-  const tipDelete = pathname.match(/^\/api\/(?:tips|recommendations)\/(.+)$/);
-  if (tipDelete && req.method === 'DELETE') {
-    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    if (user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
-    const db = readDb();
-    db.tips = db.tips.filter(t => t.id !== tipDelete[1]);
-    writeDb(db);
-    return sendJson(res, 200, { ok: true });
-  }
-
-  const chartMatch = pathname.match(/^\/api\/market\/chart\/(.+)$/);
-  if (chartMatch && req.method === 'GET') {
-    try {
-      const data = await fetchYahooChart(decodeURIComponent(chartMatch[1]));
-      if (!data) return sendJson(res, 404, { error: 'לא נמצאו נתונים' });
-      return sendJson(res, 200, data);
-    } catch (e) {
-      return sendJson(res, 502, { error: e.message });
+      
+      return sendJson(res, 201, { tip });
     }
   }
 
-  if (pathname === '/api/market/prices' && req.method === 'GET') {
-    const tickers = (query.get('tickers') || '').split(',').map(t => t.trim()).filter(Boolean);
-    const prices = {};
-    await Promise.all(tickers.map(async (ticker) => {
+  if (pathname.startsWith('/api/tips/') && req.method === 'DELETE') {
+    if (!user || user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
+    const parts = pathname.split('/');
+    const tipId = parts[parts.length - 1];
+    
+    if (isPgActive) {
       try {
-        const data = await fetchYahooChart(ticker);
-        if (data) prices[ticker.toUpperCase()] = data;
-      } catch { /* skip */ }
-    }));
-    let usdToIls = 3.75;
-    try {
-      const fx = await fetchYahooChart('ILS=X');
-      if (fx?.price) usdToIls = fx.price;
-    } catch { /* keep default */ }
-    return sendJson(res, 200, { prices, usdToIls });
-  }
-
-  if (pathname === '/api/market/search' && req.method === 'GET') {
-    const q = query.get('q');
-    if (!q || q.length < 2) return sendJson(res, 200, { quotes: [] });
-    try {
-      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}`;
-      const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PortfolioPulse/1.0)' } });
-      const data = await response.json();
-      const quotes = (data.quotes || [])
-        .filter(x => x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
-        .slice(0, 12)
-        .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname || x.symbol, quoteType: x.quoteType }));
-      return sendJson(res, 200, { quotes });
-    } catch (e) {
-      return sendJson(res, 502, { error: e.message, quotes: [] });
+        const delRes = await pool.query('DELETE FROM tips WHERE id = $1', [tipId]);
+        if (delRes.rowCount === 0) return sendJson(res, 404, { error: 'ההמלצה לא נמצאה' });
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      const initialLen = db.tips.length;
+      db.tips = db.tips.filter(t => t.id !== tipId);
+      
+      if (db.tips.length === initialLen) {
+        return sendJson(res, 404, { error: 'ההמלצה לא נמצאה' });
+      }
+      
+      writeDb(db);
+      return sendJson(res, 200, { ok: true });
     }
   }
 
@@ -1119,10 +1503,21 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/notifications/my-token' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    db.subscriptions = db.subscriptions || [];
-    const sub = db.subscriptions.find(s => s.user_id === user.id);
-    return sendJson(res, 200, { fcm_token: sub ? sub.fcm_token : null });
+    
+    if (isPgActive) {
+      try {
+        const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id = $1', [user.id]);
+        const sub = subRes.rows[0];
+        return sendJson(res, 200, { fcm_token: sub ? sub.fcm_token : null });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      db.subscriptions = db.subscriptions || [];
+      const sub = db.subscriptions.find(s => s.user_id === user.id);
+      return sendJson(res, 200, { fcm_token: sub ? sub.fcm_token : null });
+    }
   }
 
   if (
@@ -1132,51 +1527,123 @@ async function handleApi(req, res, pathname, query) {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
     const { fcm_token } = body;
-
-    const db = readDb();
-    db.subscriptions = db.subscriptions || [];
     
-    // Enforce 1:1 user-to-token mapping (DELETE all previous subscriptions for this user_id)
-    db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
-    
-    if (fcm_token) {
-      db.subscriptions.push({
-        id: uid('sub'),
-        user_id: user.id,
-        fcm_token: fcm_token,
-        created_at: new Date().toISOString()
-      });
+    if (isPgActive) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM subscriptions WHERE user_id = $1', [user.id]);
+        if (fcm_token) {
+          const subId = uid('sub');
+          await client.query(
+            'INSERT INTO subscriptions (id, user_id, fcm_token) VALUES ($1, $2, $3)',
+            [subId, user.id, fcm_token]
+          );
+        }
+        await client.query('COMMIT');
+        client.release();
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        await client.query('ROLLBACK');
+        client.release();
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      db.subscriptions = db.subscriptions || [];
+      db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
+      
+      if (fcm_token) {
+        db.subscriptions.push({
+          id: uid('sub'),
+          user_id: user.id,
+          fcm_token: fcm_token,
+          created_at: new Date().toISOString()
+        });
+      }
+      writeDb(db);
+      return sendJson(res, 200, { ok: true });
     }
-    writeDb(db);
-
-    return sendJson(res, 200, { ok: true });
   }
 
   if (pathname === '/api/notifications/poll' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
-    const db = readDb();
-    db.notifications = db.notifications || [];
     
-    const pending = db.notifications.filter(n => {
-      const isTargeted = n.user_id === user.id || n.user_id === null;
-      const isRead = n.read_by.includes(user.id);
-      return isTargeted && !isRead;
-    });
-    
-    for (const n of pending) {
-      n.read_by.push(user.id);
+    if (isPgActive) {
+      try {
+        const pendingRes = await pool.query(`
+          SELECT n.* FROM notifications n
+          WHERE (n.user_id IS NULL OR n.user_id = $1)
+            AND NOT EXISTS (
+              SELECT 1 FROM notification_reads nr
+              WHERE nr.notification_id = n.id AND nr.user_id = $1
+            )
+        `, [user.id]);
+        
+        const pending = pendingRes.rows;
+        for (const n of pending) {
+          await pool.query(
+            'INSERT INTO notification_reads (notification_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [n.id, user.id]
+          );
+        }
+        
+        return sendJson(res, 200, { 
+          notifications: pending.map(n => ({ 
+            id: n.id, 
+            title: n.title, 
+            body: n.body, 
+            date: n.created_at ? new Date(n.created_at).toISOString().split('T')[0] : null
+          })) 
+        });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    } else {
+      const db = readDb();
+      db.notifications = db.notifications || [];
+      
+      const pending = db.notifications.filter(n => {
+        const isTargeted = n.user_id === user.id || n.user_id === null;
+        const isRead = n.read_by.includes(user.id);
+        return isTargeted && !isRead;
+      });
+      
+      for (const n of pending) {
+        n.read_by.push(user.id);
+      }
+      
+      if (pending.length > 0) {
+        writeDb(db);
+      }
+      return sendJson(res, 200, { notifications: pending });
     }
-    
-    if (pending.length > 0) {
-      writeDb(db);
+  }
+
+  if (pathname === '/api/market/prices' && req.method === 'GET') {
+    const tickers = (query.get('tickers') || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    const prices = {};
+    for (const t of tickers) {
+      if (PRICE_CACHE[t]) prices[t] = PRICE_CACHE[t];
     }
-    return sendJson(res, 200, { notifications: pending });
+    return sendJson(res, 200, { prices });
+  }
+
+  if (pathname === '/api/market/search' && req.method === 'GET') {
+    const q = (query.get('q') || '').trim().toLowerCase();
+    try {
+      const resData = await fetchYahooSearch(q);
+      const quotes = (resData && resData.quotes || [])
+        .slice(0, 12)
+        .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname || x.symbol, quoteType: x.quoteType }));
+      return sendJson(res, 200, { quotes });
+    } catch (e) {
+      return sendJson(res, 502, { error: e.message, quotes: [] });
+    }
   }
 
   return sendJson(res, 404, { error: 'Not found' });
-}
-
-const server = http.createServer(async (req, res) => {
+}const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     let pathname = decodeURIComponent(url.pathname);
@@ -1270,7 +1737,7 @@ server.on('upgrade', (req, socket, head) => {
     
     let buffer = Buffer.alloc(0);
     
-    socket.on('data', (chunk) => {
+    socket.on('data', async (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
       while (true) {
         const frame = decodeWSFrame(buffer);
@@ -1290,22 +1757,38 @@ server.on('upgrade', (req, socket, head) => {
             if (msg.type === 'ping') {
               socket.write(encodeWSFrame(JSON.stringify({ type: 'pong' })));
             } else if (msg.type === 'mark_as_read') {
-              const db = readDb();
-              let updated = false;
-              db.tips = db.tips || [];
-              db.tips.forEach(t => {
-                if (t.target_user_id === msg.userId && t.recommender === 'avi' && !t.is_read) {
-                  t.is_read = true;
-                  updated = true;
+              if (isPgActive) {
+                try {
+                  const updateRes = await pool.query(
+                    "UPDATE tips SET is_read = true WHERE target_user_id = $1 AND recommender = 'avi' AND is_read = false",
+                    [msg.userId]
+                  );
+                  if (updateRes.rowCount > 0) {
+                    sendWebSocketMessage('u_admin_avi', {
+                      type: 'messages_read',
+                      userId: msg.userId
+                    });
+                  }
+                } catch (wsErr) {
+                  console.error('[WS Error] Failed to update read messages in PostgreSQL:', wsErr.message);
                 }
-              });
-              if (updated) {
-                writeDb(db);
-                // Broadcast message read event to advisor Avi
-                sendWebSocketMessage('u_admin_avi', {
-                  type: 'messages_read',
-                  userId: msg.userId
+              } else {
+                const db = readDb();
+                let updated = false;
+                db.tips = db.tips || [];
+                db.tips.forEach(t => {
+                  if (t.target_user_id === msg.userId && t.recommender === 'avi' && !t.is_read) {
+                    t.is_read = true;
+                    updated = true;
+                  }
                 });
+                if (updated) {
+                  writeDb(db);
+                  sendWebSocketMessage('u_admin_avi', {
+                    type: 'messages_read',
+                    userId: msg.userId
+                  });
+                }
               }
             }
           } catch (e) {
@@ -1336,11 +1819,13 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-const db = readDb();
-db.tips = []; // Perform clean sweep DELETE of all existing tips as requested
-writeDb(db);
 startDailyAITipsCron();
-server.listen(PORT, () => {
-  console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
-  console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);
+initDb().then(() => {
+  server.listen(PORT, () => {
+    console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
+    console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);
+  });
+}).catch(err => {
+  console.error('[Database Error] Failed to initialize database on startup:', err);
+  process.exit(1);
 });
