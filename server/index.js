@@ -967,10 +967,6 @@ async function handleApi(req, res, pathname, query) {
     }
 
     const targetUserId = body.target_user_id || null;
-    // Enforce that all Admin recommendations must be associated with a specific client (no null target_user_id)
-    if (user.role === 'admin' && !isClientMessage && !targetUserId) {
-      return sendJson(res, 400, { error: 'נא לבחור לקוח יעד ספציפי עבור ההמלצה' });
-    }
 
     const db = readDb();
     const tip = {

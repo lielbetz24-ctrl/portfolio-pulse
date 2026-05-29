@@ -2342,6 +2342,18 @@ function refreshAdminCalculations() {
     if (valTipsEl) valTipsEl.textContent = allTips.length;
     document.getElementById('admin-clients-count').textContent = `${clients.length} לקוחות`;
 
+    // אכלוס תיבת הבחירה של הלקוחות בטופס פרסום ההמלצות
+    const clientSelect = document.getElementById('tip-client-select');
+    if (clientSelect) {
+        clientSelect.innerHTML = '<option value="">-- בחר לקוח --</option>';
+        clients.forEach(client => {
+            const opt = document.createElement('option');
+            opt.value = client.id;
+            opt.textContent = client.name;
+            clientSelect.appendChild(opt);
+        });
+    }
+
     // רינדור טבלת הלקוחות בדאשבורד המנהל
     const tableBody = document.getElementById('admin-clients-table-body');
     tableBody.innerHTML = '';
@@ -2665,14 +2677,23 @@ function toggleTipFormFields() {
     const isStock = document.getElementById('tip-type-stock').checked;
     const tickerGroup = document.getElementById('tip-ticker-group');
     const tickerInput = document.getElementById('tip-ticker');
+    const clientGroup = document.getElementById('tip-client-group');
+    const clientSelect = document.getElementById('tip-client-select');
 
     if (isStock) {
         tickerGroup.style.display = 'flex';
         tickerInput.required = true;
+        if (clientGroup) clientGroup.style.display = 'flex';
+        if (clientSelect) clientSelect.required = true;
     } else {
         tickerGroup.style.display = 'none';
         tickerInput.required = false;
         tickerInput.value = '';
+        if (clientGroup) clientGroup.style.display = 'none';
+        if (clientSelect) {
+            clientSelect.required = false;
+            clientSelect.value = ''; // Reset client selection to avoid conflict
+        }
     }
 }
 
@@ -2744,9 +2765,15 @@ async function handleCreateTipSubmit(event) {
     const ticker = document.getElementById('tip-ticker').value.trim().toUpperCase();
     const content = document.getElementById('tip-content').value.trim();
     const recommender = 'avi'; // only avi recommendations allowed
+    const clientSelect = document.getElementById('tip-client-select');
+    const targetUserId = (isStock && clientSelect) ? clientSelect.value : null;
 
     if (isStock && !ticker) {
         showToast('נא להזין סימול מניה עבור המלצה ספציפית!', 'error');
+        return;
+    }
+    if (isStock && !targetUserId) {
+        showToast('נא לבחור לקוח יעד עבור ההמלצה ספציפית!', 'error');
         return;
     }
 
@@ -2763,12 +2790,14 @@ async function handleCreateTipSubmit(event) {
             imageUrl = await compressAndUploadImage(file);
         }
 
-        await API.createTip(isStock ? ticker : null, content, recommender, null, imageUrl);
+        // Submit handling: if tip is general (isStock === false), targetUserId is null
+        await API.createTip(isStock ? ticker : null, content, recommender, targetUserId, imageUrl);
         const data = await API.getTips();
         allTips = data.tips || [];
 
         document.getElementById('tip-content').value = '';
         document.getElementById('tip-ticker').value = '';
+        if (clientSelect) clientSelect.value = '';
         document.getElementById('tip-type-general').checked = true;
         toggleTipFormFields();
 
