@@ -124,3 +124,15 @@ self.addEventListener('push', (event) => {
   // No additional manual notification rendering is needed here since Native WebPush handles it.
   // The mere presence of this event listener signals the OS to wake and maintain this thread active.
 });
+
+/* ==================== Native Push Subscription Rotation Automation ==================== */
+self.addEventListener('pushsubscriptionchange', event => {
+  console.log('⭐⭐⭐ [Firebase SW] Push subscription changed or expired natively! Signaling clients...');
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      for (const client of clients) {
+        client.postMessage({ type: 'REFRESH_PUSH_SUBSCRIPTION' });
+      }
+    })
+  );
+});

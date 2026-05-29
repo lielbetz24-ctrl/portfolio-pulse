@@ -1117,6 +1117,14 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
+  if (pathname === '/api/notifications/my-token' && req.method === 'GET') {
+    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
+    const db = readDb();
+    db.subscriptions = db.subscriptions || [];
+    const sub = db.subscriptions.find(s => s.user_id === user.id);
+    return sendJson(res, 200, { fcm_token: sub ? sub.fcm_token : null });
+  }
+
   if (
     ((pathname === '/api/notifications/subscribe' || pathname === '/api/save-fcm-token') && req.method === 'POST') ||
     (pathname === '/api/update-token' && req.method === 'PUT')
