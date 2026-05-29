@@ -247,9 +247,10 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
       const payload = {
         message: {
           token: token,
-          notification: {
-            title: title,
-            body: body
+          data: {
+            title: String(title || ''),
+            body: String(body || ''),
+            icon: String(icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png')
           },
           android: {
             priority: "high"
@@ -257,10 +258,6 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
           webpush: {
             headers: {
               "Urgency": "high"
-            },
-            notification: {
-              icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-              badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
             }
           }
         }
