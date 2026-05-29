@@ -255,8 +255,8 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
             notification: {
               title: title,
               body: body,
-              icon: "/icons/icon-192x192.png",
-              badge: "/icons/icon-72x72.png",
+              icon: "https://portfolio-pulse-mux5.onrender.com/icons/icon-192x192.png",
+              badge: "https://portfolio-pulse-mux5.onrender.com/icons/icon-72x72.png",
               click_action: "https://portfolio-pulse-mux5.onrender.com/tips"
             }
           }

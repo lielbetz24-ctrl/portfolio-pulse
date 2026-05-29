@@ -68,7 +68,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  console.log('[Firebase SW] Activating and cleaning old caches...');
+  console.log('⭐⭐⭐ [Firebase SW] Activating and confirming Root Scope alignment:', self.registration.scope);
   event.waitUntil(
     caches.keys().then(keys => {
       return Promise.all(
