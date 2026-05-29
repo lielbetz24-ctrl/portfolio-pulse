@@ -240,25 +240,22 @@ document.addEventListener("DOMContentLoaded", () => {
     // Register Service Worker for PWA only if notification permission is already granted
     if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
         window.addEventListener('load', () => {
-            // Unregister legacy sw.js if present to prevent service worker conflicts
-            navigator.serviceWorker.getRegistrations().then(registrations => {
+            // Unregister all legacy service workers first to force the latest PWA updates
+            navigator.serviceWorker.getRegistrations().then(async registrations => {
                 for (const registration of registrations) {
-                    if (registration.active && registration.active.scriptURL.includes('/sw.js')) {
-                        registration.unregister().then(success => {
-                            if (success) console.log('[Service Worker] Successfully unregistered legacy sw.js');
-                        });
-                    }
+                    await registration.unregister();
+                    console.log('[Service Worker] Successfully unregistered active registration prior to update');
                 }
+                
+                // Register Unified fresh Firebase Messaging & Caching Service Worker
+                navigator.serviceWorker.register('/firebase-messaging-sw.js')
+                    .then(reg => {
+                        console.log('⭐⭐⭐ [Service Worker] Unified fresh SW registered successfully:', reg.scope);
+                        reg.update();
+                        initFirebase();
+                    })
+                    .catch(err => console.error('[Service Worker] Unified SW registration failed:', err));
             }).catch(err => console.warn('[Service Worker] Error clearing legacy registrations:', err));
-
-            // Register Unified Firebase Messaging & Caching Service Worker
-            navigator.serviceWorker.register('/firebase-messaging-sw.js')
-                .then(reg => {
-                    console.log('[Service Worker] Unified Firebase/Caching SW registered successfully:', reg.scope);
-                    reg.update();
-                    initFirebase();
-                })
-                .catch(err => console.error('[Service Worker] Unified SW registration failed:', err));
         });
     }
 
@@ -2912,7 +2909,14 @@ function togglePushSubscription(event) {
                 showToast('הרשאת התראות אושרה! מתחבר לשרת ההתראות...', 'info');
                 
                 try {
-                    // Register the Firebase Service Worker
+                    // Unregister all active Service Workers first to force update
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for (const r of registrations) {
+                        await r.unregister();
+                        console.log('[FCM Client] Unregistered legacy SW before clean register');
+                    }
+
+                    // Register fresh Firebase Service Worker
                     const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
                     console.log('⭐⭐⭐ [FCM Client] Service Worker registered successfully:', reg.scope);
                     reg.update();
