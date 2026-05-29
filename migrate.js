@@ -99,6 +99,31 @@ async function run() {
         fcm_token TEXT NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS stocks (
+        ticker VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        change DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        previous_close DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
+      CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
+
+      CREATE TABLE IF NOT EXISTS positions (
+        portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
+        ticker VARCHAR(20) NOT NULL,
+        quantity DECIMAL(15, 6) NOT NULL DEFAULT 0,
+        avg_buy_price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        current_price DECIMAL(15, 4) DEFAULT NULL,
+        market_value DECIMAL(15, 4) DEFAULT NULL,
+        pnl DECIMAL(15, 4) DEFAULT NULL,
+        pnl_pct DECIMAL(15, 4) DEFAULT NULL,
+        PRIMARY KEY (portfolio_id, ticker)
+      );
     `);
     
     console.log('[Migration] Database schema tables initialized!');

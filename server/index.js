@@ -4,7 +4,10 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Force DECIMAL/NUMERIC (OID 1700) to be parsed as native JavaScript floats rather than string objects
+types.setTypeParser(1700, val => parseFloat(val));
 
 const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/portfolio_pulse';
 const pool = new Pool({
@@ -87,8 +90,41 @@ async function initDb() {
         fcm_token TEXT NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS stocks (
+        ticker VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        change DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        previous_close DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
+      CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
+
+      CREATE TABLE IF NOT EXISTS positions (
+        portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
+        ticker VARCHAR(20) NOT NULL,
+        quantity DECIMAL(15, 6) NOT NULL DEFAULT 0,
+        avg_buy_price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+        current_price DECIMAL(15, 4) DEFAULT NULL,
+        market_value DECIMAL(15, 4) DEFAULT NULL,
+        pnl DECIMAL(15, 4) DEFAULT NULL,
+        pnl_pct DECIMAL(15, 4) DEFAULT NULL,
+        PRIMARY KEY (portfolio_id, ticker)
+      );
     `);
     console.log('[Database] Database tables initialized successfully!');
+
+    // Re-index stocks table on startup as requested
+    try {
+      await pool.query('REINDEX TABLE stocks');
+      console.log('[Database] Table "stocks" re-indexed successfully.');
+    } catch (reindexErr) {
+      console.error('[Database Warning] Failed to re-index stocks table:', reindexErr.message);
+    }
     
     // Auto-migrate local JSON database into PostgreSQL if present on boot
     await migrateJsonToPostgres(pool);
@@ -107,6 +143,27 @@ async function initDb() {
       );
       console.log('[Database] Seeding completed.');
     }
+
+    // Sync all existing portfolios to positions table on boot
+    const startupClient = await pool.connect();
+    try {
+      const portRes = await startupClient.query('SELECT id FROM portfolios');
+      console.log(`[Database] Syncing positions for ${portRes.rows.length} portfolios on startup...`);
+      for (const port of portRes.rows) {
+        await syncPortfolioPositions(port.id, startupClient);
+      }
+      console.log('[Database] Initial startup positions sync completed.');
+    } catch (syncErr) {
+      console.error('[Database Error] Failed startup positions sync:', syncErr.message);
+    } finally {
+      startupClient.release();
+    }
+
+    // Run stock price updater once on startup in background
+    updateAllStockPricesJob().catch(err => {
+      console.error('[Job Error] Failed to run initial stock price update:', err.message);
+    });
+
   } catch (err) {
     console.warn('[Database Warning] PostgreSQL connection failed. Falling back to JSON database mode (data/db.json). Reason:', err.message);
     isPgActive = false;
@@ -795,6 +852,156 @@ function publicUser(u) {
   return { id: u.id, name: u.name, email: u.email, role: u.role };
 }
 
+async function updateStockInDb(client, stockData) {
+  if (!isPgActive) return;
+  await client.query(`
+    INSERT INTO stocks (ticker, name, price, change, currency, previous_close, last_updated)
+    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    ON CONFLICT (ticker) DO UPDATE SET
+      name = EXCLUDED.name,
+      price = EXCLUDED.price,
+      change = EXCLUDED.change,
+      currency = EXCLUDED.currency,
+      previous_close = EXCLUDED.previous_close,
+      last_updated = NOW()
+  `, [
+    stockData.ticker.toUpperCase(),
+    stockData.name || stockData.ticker,
+    Number(stockData.price || 0),
+    Number(stockData.change || 0),
+    stockData.currency || 'USD',
+    Number(stockData.previousClose || stockData.previous_close || 0)
+  ]);
+}
+
+async function syncPortfolioPositions(portfolioId, client) {
+  if (!isPgActive) return;
+  
+  const txRes = await client.query(`
+    SELECT * FROM transactions 
+    WHERE portfolio_id = $1 
+    ORDER BY transaction_date ASC, created_at ASC
+  `, [portfolioId]);
+  
+  const transactions = txRes.rows;
+  const holdingsMap = {};
+  
+  for (const tx of transactions) {
+    if (tx.action_type === 'deposit' || tx.action_type === 'withdraw') continue;
+    const ticker = (tx.ticker || '').toUpperCase();
+    if (!ticker) continue;
+    
+    if (!holdingsMap[ticker]) {
+      holdingsMap[ticker] = {
+        ticker,
+        quantity: 0,
+        total_buy_cost: 0,
+        total_buy_qty: 0
+      };
+    }
+    
+    const h = holdingsMap[ticker];
+    const qty = Number(tx.quantity || 0);
+    const price = Number(tx.price || 0);
+    
+    if (tx.action_type === 'buy' || tx.action_type === 'holding') {
+      h.quantity += qty;
+      h.total_buy_cost += qty * price;
+      h.total_buy_qty += qty;
+    } else if (tx.action_type === 'sell') {
+      h.quantity -= qty;
+      if (h.quantity <= 0.000001) {
+        delete holdingsMap[ticker];
+      }
+    }
+  }
+  
+  const activeTickers = Object.keys(holdingsMap);
+  
+  if (activeTickers.length > 0) {
+    await client.query(`
+      DELETE FROM positions 
+      WHERE portfolio_id = $1 AND NOT (ticker = ANY($2))
+    `, [portfolioId, activeTickers]);
+  } else {
+    await client.query(`DELETE FROM positions WHERE portfolio_id = $1`, [portfolioId]);
+  }
+  
+  for (const ticker of activeTickers) {
+    const h = holdingsMap[ticker];
+    const avg_buy_price = h.total_buy_qty > 0 ? h.total_buy_cost / h.total_buy_qty : 0;
+    
+    const stockRes = await client.query('SELECT * FROM stocks WHERE ticker = $1', [ticker]);
+    let current_price = null;
+    let market_value = null;
+    let pnl = null;
+    let pnl_pct = null;
+    
+    if (stockRes.rows.length > 0) {
+      const stock = stockRes.rows[0];
+      current_price = Number(stock.price);
+      market_value = h.quantity * current_price;
+      pnl = market_value - (h.quantity * avg_buy_price);
+      pnl_pct = avg_buy_price > 0 ? (pnl / (h.quantity * avg_buy_price)) * 100 : 0;
+    }
+    
+    await client.query(`
+      INSERT INTO positions (portfolio_id, ticker, quantity, avg_buy_price, current_price, market_value, pnl, pnl_pct)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (portfolio_id, ticker) DO UPDATE SET
+        quantity = EXCLUDED.quantity,
+        avg_buy_price = EXCLUDED.avg_buy_price,
+        current_price = EXCLUDED.current_price,
+        market_value = EXCLUDED.market_value,
+        pnl = EXCLUDED.pnl,
+        pnl_pct = EXCLUDED.pnl_pct
+    `, [
+      portfolioId,
+      ticker,
+      h.quantity,
+      avg_buy_price,
+      current_price,
+      market_value,
+      pnl,
+      pnl_pct
+    ]);
+  }
+}
+
+async function updateAllStockPricesJob() {
+  if (!isPgActive) return;
+  
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT DISTINCT ticker FROM transactions WHERE ticker IS NOT NULL');
+    const tickers = res.rows.map(r => r.ticker.toUpperCase());
+    
+    if (tickers.length === 0) return;
+    
+    console.log(`[Job] Updating database prices for ${tickers.length} tickers:`, tickers.join(', '));
+    for (const t of tickers) {
+      try {
+        const data = await fetchYahooChart(t);
+        if (data) {
+          await updateStockInDb(client, data);
+        }
+      } catch (err) {
+        console.error(`[Job Error] Failed to update stock ${t}:`, err.message);
+      }
+    }
+    
+    const portfoliosRes = await client.query('SELECT id FROM portfolios');
+    for (const port of portfoliosRes.rows) {
+      await syncPortfolioPositions(port.id, client);
+    }
+    console.log('[Job] Stock prices database update completed successfully.');
+  } catch (err) {
+    console.error('[Job Error] Failed to run updateAllStockPricesJob:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -868,6 +1075,20 @@ async function fetchYahooChart(ticker) {
       timestamp: Date.now(),
       data: result
     };
+
+    if (isPgActive) {
+      pool.connect().then(async (client) => {
+        try {
+          await updateStockInDb(client, result);
+        } catch (dbErr) {
+          console.error(`[Database Error] Failed to auto-upsert stock ${normTicker}:`, dbErr.message);
+        } finally {
+          client.release();
+        }
+      }).catch(connectErr => {
+        console.error(`[Database Error] Failed to connect for auto-upsert of stock ${normTicker}:`, connectErr.message);
+      });
+    }
 
     return result;
   } catch (e) {
@@ -1239,7 +1460,10 @@ async function handleApi(req, res, pathname, query) {
           date: t.date ? new Date(t.date).toISOString().split('T')[0] : null
         }));
         
-        const prices = { ...PRICE_CACHE };
+        const prices = {};
+        for (const ticker in PRICE_CACHE) {
+          prices[ticker] = PRICE_CACHE[ticker].data;
+        }
         return sendJson(res, 200, {
           portfolios,
           transactions,
@@ -1291,6 +1515,191 @@ async function handleApi(req, res, pathname, query) {
       const ids = portfolios.map(p => p.id);
       const transactions = db.transactions.filter(t => ids.includes(t.portfolio_id));
       return sendJson(res, 200, { portfolios, transactions, tips, clients: [], prices });
+    }
+  }
+
+  if (pathname === '/api/positions' && req.method === 'GET') {
+    if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
+    
+    if (isPgActive) {
+      const client = await pool.connect();
+      try {
+        let portRes = await client.query('SELECT * FROM portfolios WHERE user_id = $1', [user.id]);
+        let portfolio = portRes.rows[0];
+        if (!portfolio) {
+          const pId = uid('p');
+          await client.query('INSERT INTO portfolios (id, user_id, name, cash_balance) VALUES ($1, $2, $3, $4)', [pId, user.id, 'תיק השקעות אישי', 0]);
+          portRes = await client.query('SELECT * FROM portfolios WHERE id = $1', [pId]);
+          portfolio = portRes.rows[0];
+        }
+
+        await syncPortfolioPositions(portfolio.id, client);
+
+        const posRes = await client.query(`
+          SELECT p.*, s.name as stock_name, s.change as daily_change
+          FROM positions p
+          LEFT JOIN stocks s ON p.ticker = s.ticker
+          WHERE p.portfolio_id = $1
+        `, [portfolio.id]);
+
+        const holdings = posRes.rows.map(r => ({
+          ticker: r.ticker,
+          name: r.stock_name || r.ticker,
+          quantity: Number(r.quantity),
+          avg_buy_price: Number(r.avg_buy_price),
+          current_price: r.current_price !== null ? Number(r.current_price) : null,
+          market_value: r.market_value !== null ? Number(r.market_value) : null,
+          pnl: r.pnl !== null ? Number(r.pnl) : null,
+          pnl_pct: r.pnl_pct !== null ? Number(r.pnl_pct) : null,
+          daily_change: r.daily_change !== null ? Number(r.daily_change) : null
+        }));
+
+        const cash_balance = Number(portfolio.cash_balance);
+        let total_stock_value = 0;
+        let total_cost = 0;
+        let total_pnl = 0;
+        
+        let daily_change_usd = 0;
+        let total_prev_stock_value = 0;
+
+        holdings.forEach(h => {
+          if (h.market_value !== null) {
+            total_stock_value += h.market_value;
+            total_cost += h.quantity * h.avg_buy_price;
+            total_pnl += h.pnl;
+            
+            if (h.daily_change !== null && h.current_price !== null) {
+              const change = h.daily_change;
+              const prevClose = h.current_price / (1 + change / 100);
+              daily_change_usd += h.quantity * (h.current_price - prevClose);
+              total_prev_stock_value += h.quantity * prevClose;
+            }
+          }
+        });
+
+        const total_equity = cash_balance + total_stock_value;
+        const total_pnl_pct = total_cost > 0 ? (total_pnl / total_cost) * 100 : 0;
+        const daily_change_pct = total_prev_stock_value > 0 ? (daily_change_usd / total_prev_stock_value) * 100 : 0;
+
+        client.release();
+
+        return sendJson(res, 200, {
+          portfolio_id: portfolio.id,
+          portfolio_name: portfolio.name,
+          cash_balance,
+          total_stock_value,
+          total_equity,
+          total_pnl,
+          total_pnl_pct,
+          daily_change_usd,
+          daily_change_pct,
+          holdings
+        });
+      } catch (err) {
+        client.release();
+        return sendJson(res, 500, { error: err.message });
+      }
+    } else {
+      const db = readDb();
+      let portfolio = db.portfolios.find(p => p.user_id === user.id);
+      if (!portfolio) {
+        portfolio = { id: uid('p'), user_id: user.id, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() };
+        db.portfolios.push(portfolio);
+        writeDb(db);
+      }
+
+      const transactions = db.transactions.filter(t => t.portfolio_id === portfolio.id);
+      const holdingsMap = {};
+      
+      for (const tx of transactions) {
+        if (tx.action_type === 'deposit' || tx.action_type === 'withdraw') continue;
+        const ticker = (tx.ticker || '').toUpperCase();
+        if (!ticker) continue;
+        
+        if (!holdingsMap[ticker]) {
+          holdingsMap[ticker] = { ticker, quantity: 0, total_buy_cost: 0, total_buy_qty: 0 };
+        }
+        const h = holdingsMap[ticker];
+        const qty = Number(tx.quantity || 0);
+        const price = Number(tx.price || 0);
+        
+        if (tx.action_type === 'buy' || tx.action_type === 'holding') {
+          h.quantity += qty;
+          h.total_buy_cost += qty * price;
+          h.total_buy_qty += qty;
+        } else if (tx.action_type === 'sell') {
+          h.quantity -= qty;
+          if (h.quantity <= 0.000001) delete holdingsMap[ticker];
+        }
+      }
+
+      const holdings = [];
+      const cash_balance = Number(portfolio.cash_balance);
+      let total_stock_value = 0;
+      let total_cost = 0;
+      let total_pnl = 0;
+      let daily_change_usd = 0;
+      let total_prev_stock_value = 0;
+
+      for (const ticker in holdingsMap) {
+        const h = holdingsMap[ticker];
+        const avg_buy_price = h.total_buy_qty > 0 ? h.total_buy_cost / h.total_buy_qty : 0;
+        
+        const cached = PRICE_CACHE[ticker];
+        let name = ticker;
+        let current_price = null;
+        let market_value = null;
+        let pnl = null;
+        let pnl_pct = null;
+        let daily_change = null;
+
+        if (cached && cached.data) {
+          const stock = cached.data;
+          name = stock.name || ticker;
+          current_price = Number(stock.price);
+          market_value = h.quantity * current_price;
+          pnl = market_value - (h.quantity * avg_buy_price);
+          pnl_pct = avg_buy_price > 0 ? (pnl / (h.quantity * avg_buy_price)) * 100 : 0;
+          daily_change = Number(stock.change || 0);
+
+          total_stock_value += market_value;
+          total_cost += h.quantity * avg_buy_price;
+          total_pnl += pnl;
+
+          const prevClose = current_price / (1 + daily_change / 100);
+          daily_change_usd += h.quantity * (current_price - prevClose);
+          total_prev_stock_value += h.quantity * prevClose;
+        }
+
+        holdings.push({
+          ticker,
+          name,
+          quantity: h.quantity,
+          avg_buy_price,
+          current_price,
+          market_value,
+          pnl,
+          pnl_pct,
+          daily_change
+        });
+      }
+
+      const total_equity = cash_balance + total_stock_value;
+      const total_pnl_pct = total_cost > 0 ? (total_pnl / total_cost) * 100 : 0;
+      const daily_change_pct = total_prev_stock_value > 0 ? (daily_change_usd / total_prev_stock_value) * 100 : 0;
+
+      return sendJson(res, 200, {
+        portfolio_id: portfolio.id,
+        portfolio_name: portfolio.name,
+        cash_balance,
+        total_stock_value,
+        total_equity,
+        total_pnl,
+        total_pnl_pct,
+        daily_change_usd,
+        daily_change_pct,
+        holdings
+      });
     }
   }
 
@@ -1358,6 +1767,8 @@ async function handleApi(req, res, pathname, query) {
           INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `, [tx.id, tx.portfolio_id, tx.ticker, tx.action_type, tx.quantity, tx.price, tx.transaction_date, tx.created_by_user_id]);
+        
+        await syncPortfolioPositions(tx.portfolio_id, client);
         
         await client.query('COMMIT');
         client.release();
@@ -1800,10 +2211,22 @@ async function handleApi(req, res, pathname, query) {
   if (pathname === '/api/market/prices' && req.method === 'GET') {
     const tickers = (query.get('tickers') || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
     const prices = {};
-    for (const t of tickers) {
-      if (PRICE_CACHE[t]) prices[t] = PRICE_CACHE[t];
+    await Promise.all(tickers.map(async (ticker) => {
+      try {
+        const data = await fetchYahooChart(ticker);
+        if (data) prices[ticker] = data;
+      } catch (e) {
+        console.log(`[Market Prices API] Failed to fetch price for ${ticker}:`, e.message);
+      }
+    }));
+    let usdToIls = 3.75;
+    try {
+      const fx = await fetchYahooChart('ILS=X');
+      if (fx?.price) usdToIls = fx.price;
+    } catch (e) {
+      console.log('[Market Prices API] Failed to fetch USD/ILS exchange rate:', e.message);
     }
-    return sendJson(res, 200, { prices });
+    return sendJson(res, 200, { prices, usdToIls });
   }
 
   if (pathname === '/api/market/search' && req.method === 'GET') {
@@ -1872,6 +2295,16 @@ function startDailyAITipsCron() {
       console.error('[Cron Error] Failed to run daily AI tips checker:', err.message);
     }
   }, 30000); // check every 30 seconds
+}
+
+function startStockPricesCron() {
+  setInterval(async () => {
+    try {
+      await updateAllStockPricesJob();
+    } catch (err) {
+      console.error('[Cron Error] Failed to trigger periodic stock update job:', err.message);
+    }
+  }, 2 * 60 * 1000); // Check and update every 2 minutes
 }
 
 server.on('upgrade', (req, socket, head) => {
@@ -1997,6 +2430,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 startDailyAITipsCron();
+startStockPricesCron();
 initDb().then(() => {
   server.listen(PORT, () => {
     console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);

@@ -642,6 +642,11 @@ async function loadUserData() {
         }
 
         if (currentUser.role === 'client') {
+            try {
+                window.positionsSummary = await API.getPositions();
+            } catch (posErr) {
+                console.error("Failed to load DB positions summary:", posErr);
+            }
             refreshCalculations();
             renderPersonalTips();
         } else {
@@ -830,12 +835,34 @@ function refreshCalculations() {
     if (portfolios.length === 0) return;
     
     const activePortfolio = portfolios[0];
-    const metrics = calculatePortfolioMetrics(activePortfolio.id);
+    let metrics;
+    let totalEquity;
+    
+    if (currentUser.role === 'client' && window.positionsSummary) {
+        const s = window.positionsSummary;
+        const holdingsMap = {};
+        (s.holdings || []).forEach(h => {
+            holdingsMap[h.ticker] = h;
+        });
+        
+        metrics = {
+            cash_balance: s.cash_balance,
+            totalPnL: s.total_pnl,
+            totalPnLPct: s.total_pnl_pct,
+            totalDailyChangeUSD: s.daily_change_usd,
+            totalDailyChangePct: s.daily_change_pct,
+            holdingsList: s.holdings || [],
+            holdingsMap
+        };
+        totalEquity = s.total_equity;
+    } else {
+        metrics = calculatePortfolioMetrics(activePortfolio.id);
+        totalEquity = calculateTotalEquity(activePortfolio.id);
+    }
 
     currentHoldings = metrics.holdingsMap;
 
     // עדכון אלמנטים בדאשבורד — Total Equity = Σ(כמות × שער שוק) + מזומן
-    const totalEquity = calculateTotalEquity(activePortfolio.id);
     document.getElementById('val-total-portfolio').textContent = formatCurrency(totalEquity);
     document.getElementById('val-cash-balance').textContent = formatCurrency(metrics.cash_balance);
     
@@ -1061,7 +1088,16 @@ function renderCharts() {
     const activePortfolio = portfolios[0];
     
     // שליפת הנתונים העדכניים לתיק המחושב
-    const metrics = calculatePortfolioMetrics(activePortfolio.id);
+    let metrics;
+    if (currentUser.role === 'client' && window.positionsSummary) {
+        const s = window.positionsSummary;
+        metrics = {
+            cash_balance: s.cash_balance,
+            holdingsList: s.holdings || []
+        };
+    } else {
+        metrics = calculatePortfolioMetrics(activePortfolio.id);
+    }
 
     const labels = ['מזומן פנוי'];
     const data = [metrics.cash_balance];

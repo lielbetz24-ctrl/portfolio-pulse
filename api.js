@@ -51,5 +51,8 @@ const API = {
   },
   marketSearch(term) {
     return this.request('GET', `/api/market/search?q=${encodeURIComponent(term)}`);
+  },
+  getPositions() {
+    return this.request('GET', '/api/positions');
   }
 };
