@@ -1,45 +1,47 @@
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
-// Dynamically fetch Firebase Web Config from server environment variables on SW boot
-fetch('/api/notifications/firebase-config')
-  .then(res => res.json())
-  .then(config => {
-    if (!config || !config.apiKey || config.apiKey === 'mock-api-key') {
-      console.warn('[Firebase SW] Firebase credentials not configured on server yet.');
-      return;
+console.log('⭐⭐⭐ [Firebase SW] Booting Service Worker...');
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCU1ANCETIoZxieZIoNMhnA-zl3jhyzv0U",
+  authDomain: "portfoliopulse-22795.firebaseapp.com",
+  projectId: "portfoliopulse-22795",
+  storageBucket: "portfoliopulse-22795.firebasestorage.app",
+  messagingSenderId: "279949836627",
+  appId: "1:279949836627:web:ec383103a14201373721a6",
+  measurementId: "G-HNZF1T7CJB"
+};
+
+// Initialize Firebase synchronously at boot time
+firebase.initializeApp(firebaseConfig);
+const messaging = firebase.messaging();
+console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW context!');
+
+// Register background message interception synchronously
+messaging.onBackgroundMessage((payload) => {
+  console.log('⭐⭐⭐ [Firebase SW] Intercepted background push message: ', payload);
+  
+  const notificationTitle = payload.notification ? payload.notification.title : (payload.data ? payload.data.title : 'עדכון חדש');
+  const notificationBody = payload.notification ? payload.notification.body : (payload.data ? payload.data.body : '');
+  const notificationIcon = payload.notification ? payload.notification.icon : (payload.data ? payload.data.icon : 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png');
+  
+  const options = {
+    body: notificationBody,
+    icon: notificationIcon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+    badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+    vibrate: [100, 50, 100],
+    data: {
+      url: '/'
     }
+  };
 
-    firebase.initializeApp(config);
-    const messaging = firebase.messaging();
-
-    // Intercept background push messaging events when the app is closed or suspended
-    messaging.onBackgroundMessage((payload) => {
-      console.log('[Firebase SW] Intercepted background push message: ', payload);
-      
-      const notificationTitle = payload.notification ? payload.notification.title : (payload.data ? payload.data.title : 'עדכון חדש');
-      const notificationBody = payload.notification ? payload.notification.body : (payload.data ? payload.data.body : '');
-      const notificationIcon = payload.notification ? payload.notification.icon : (payload.data ? payload.data.icon : 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png');
-      
-      const options = {
-        body: notificationBody,
-        icon: notificationIcon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-        badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-        vibrate: [100, 50, 100],
-        data: {
-          url: '/'
-        }
-      };
-
-      return self.registration.showNotification(notificationTitle, options);
-    });
-  })
-  .catch(err => {
-    console.error('[Firebase SW] Initialization failed:', err.message);
-  });
+  return self.registration.showNotification(notificationTitle, options);
+});
 
 // Handle notification click to focus active PWA or WebView window
 self.addEventListener('notificationclick', event => {
+  console.log('⭐⭐⭐ [Firebase SW] Notification clicked:', event.notification);
   event.notification.close();
 
   event.waitUntil(
@@ -53,6 +55,9 @@ self.addEventListener('notificationclick', event => {
         } catch (e) {
           // Ignore URL parse failures
         }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('/');
       }
     })
   );
@@ -72,6 +77,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', event => {
+  console.log('[Firebase SW] Installing and pre-caching assets...');
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       return cache.addAll(ASSETS).catch(err => console.log('SW Cache AddAll warning:', err));
@@ -81,6 +87,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
+  console.log('[Firebase SW] Activating and cleaning old caches...');
   event.waitUntil(
     caches.keys().then(keys => {
       return Promise.all(
@@ -96,10 +103,17 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  // Exclude API requests and non-GET requests from local cache completely
-  if (event.request.method !== 'GET' || event.request.url.includes('/api/')) {
+  // Exclude non-GET requests, API requests, FCM, and Google/Firebase SDKs from local cache completely
+  if (
+    event.request.method !== 'GET' || 
+    event.request.url.includes('/api/') || 
+    event.request.url.includes('googleapis') || 
+    event.request.url.includes('firebase') ||
+    event.request.url.includes('fcm')
+  ) {
     return;
   }
+  
   event.respondWith(
     fetch(event.request)
       .then(response => {

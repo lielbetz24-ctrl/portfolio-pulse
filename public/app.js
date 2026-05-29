@@ -9,7 +9,7 @@ async function initFirebase() {
     try {
         const config = await API.request('GET', '/api/notifications/firebase-config');
         if (!config || !config.apiKey || config.apiKey === 'mock-api-key') {
-            console.warn('[Firebase] Firebase configuration not defined in environment variables yet.');
+            console.warn('⚠️ [Firebase] Firebase configuration not defined in environment variables yet.');
             return;
         }
 
@@ -17,17 +17,17 @@ async function initFirebase() {
         firebase.initializeApp(config);
         messaging = firebase.messaging();
         firebaseConfigData = config;
-        console.log('[Firebase] Successfully initialized Firebase Cloud Messaging!');
+        console.log('⭐⭐⭐ [Firebase] Successfully initialized Firebase Cloud Messaging!');
 
         // Foreground messages listener
         messaging.onMessage((payload) => {
-            console.log('[Firebase] Received foreground message:', payload);
+            console.log('⭐⭐⭐ [Firebase] Received Foreground Push Notification:', payload);
             if (payload && payload.notification) {
                 showToast(`${payload.notification.title}: ${payload.notification.body}`, 'success');
             }
         });
     } catch (e) {
-        console.warn('[Firebase] Failed to initialize Firebase:', e);
+        console.warn('⚠️ [Firebase] Failed to initialize Firebase:', e);
     }
 }
 
@@ -2914,7 +2914,7 @@ function togglePushSubscription(event) {
                 try {
                     // Register the Firebase Service Worker
                     const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                    console.log('Firebase Service Worker registered successfully after permission granted:', reg.scope);
+                    console.log('⭐⭐⭐ [FCM Client] Service Worker registered successfully:', reg.scope);
                     reg.update();
 
                     // Initialize Firebase SDK
@@ -2929,7 +2929,7 @@ function togglePushSubscription(event) {
                             vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
                         });
                         
-                        console.log('[FCM Client] Token successfully retrieved:', fcmToken);
+                        console.log('⭐⭐⭐ [FCM Client] Token successfully retrieved! FCM Token:', fcmToken);
 
                         // Save token in DB immediately!
                         await API.request('POST', '/api/notifications/subscribe', {
