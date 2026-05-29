@@ -21,22 +21,8 @@ console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW con
 // Register background message interception synchronously
 messaging.onBackgroundMessage((payload) => {
   console.log('⭐⭐⭐ [Firebase SW] Intercepted background push message: ', payload);
-  
-  const notificationTitle = payload.notification ? payload.notification.title : (payload.data ? payload.data.title : 'עדכון חדש');
-  const notificationBody = payload.notification ? payload.notification.body : (payload.data ? payload.data.body : '');
-  const notificationIcon = payload.notification ? payload.notification.icon : (payload.data ? payload.data.icon : 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png');
-  
-  const options = {
-    body: notificationBody,
-    icon: notificationIcon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-    badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-    vibrate: [100, 50, 100],
-    data: {
-      url: '/'
-    }
-  };
-
-  return self.registration.showNotification(notificationTitle, options);
+  // Manual showNotification call removed to prevent duplicate notifications.
+  // The Firebase SDK automatically displays the notification block when received in the background.
 });
 
 // Handle notification click to focus active PWA or WebView window

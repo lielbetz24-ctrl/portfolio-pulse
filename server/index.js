@@ -408,11 +408,22 @@ async function triggerFcmNotification(db, targetUserId, title, body) {
     targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
   }
 
-  console.log(`[FCM Trigger] Dispatching push to ${targets.length} tokens for target: ${targetUserId || 'all clients'}`);
+  // Deduplicate target records by FCM token/endpoint to guarantee we never send twice to the same device
+  const seenTokens = new Set();
+  const uniqueTargets = [];
+  for (const s of targets) {
+    const t = s.fcm_token || s.endpoint;
+    if (t && !seenTokens.has(t)) {
+      seenTokens.add(t);
+      uniqueTargets.push(s);
+    }
+  }
+
+  console.log(`[FCM Trigger] Dispatching push to ${uniqueTargets.length} unique tokens for target: ${targetUserId || 'all clients'}`);
   
   const icon = 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png';
   
-  const promises = targets.map(subRecord => {
+  const promises = uniqueTargets.map(subRecord => {
     const token = subRecord.fcm_token || subRecord.endpoint;
     if (!token || token.startsWith('mock-')) {
       return Promise.resolve({ success: true, mock: true });
