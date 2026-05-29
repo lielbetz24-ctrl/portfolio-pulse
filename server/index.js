@@ -249,14 +249,15 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
           token: token,
           webpush: {
             headers: {
-              "Urgency": "high"
+              "Urgency": "high",
+              "TTL": "86400"
             },
             notification: {
               title: title,
               body: body,
-              icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-              badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
-              click_action: "https://portfolio-pulse-mux5.onrender.com/"
+              icon: "/icons/icon-192x192.png",
+              badge: "/icons/icon-72x72.png",
+              click_action: "https://portfolio-pulse-mux5.onrender.com/tips"
             }
           }
         }
@@ -1128,16 +1129,17 @@ async function handleApi(req, res, pathname, query) {
     const db = readDb();
     db.subscriptions = db.subscriptions || [];
     
-    const idx = db.subscriptions.findIndex(s => s.user_id === user.id && s.fcm_token === fcm_token);
-    if (idx === -1) {
-      db.subscriptions.push({
-        id: uid('sub'),
-        user_id: user.id,
-        fcm_token: fcm_token,
-        created_at: new Date().toISOString()
-      });
-      writeDb(db);
-    }
+    // Enforce 1:1 user-to-token mapping (DELETE all previous subscriptions for this user_id)
+    db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
+    
+    db.subscriptions.push({
+      id: uid('sub'),
+      user_id: user.id,
+      fcm_token: fcm_token,
+      created_at: new Date().toISOString()
+    });
+    writeDb(db);
+
     return sendJson(res, 200, { ok: true });
   }
 
@@ -1173,6 +1175,13 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname.startsWith('/api/')) {
       return await handleApi(req, res, pathname, url.searchParams);
+    }
+
+    if (pathname === '/firebase-messaging-sw.js') {
+      const swPath = path.join(PUBLIC, 'firebase-messaging-sw.js');
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      fs.createReadStream(swPath).pipe(res);
+      return;
     }
 
     if (pathname === '/') pathname = '/index.html';
