@@ -34,13 +34,13 @@ const API = {
     return this.request('POST', '/api/transactions', tx);
   },
   getTips() {
-    return this.request('GET', '/api/tips');
+    return this.request('GET', '/api/recommendations');
   },
   createTip(ticker, content, recommender = 'avi', target_user_id = null, image_url = null) {
-    return this.request('POST', '/api/tips', { ticker, content, recommender, target_user_id, image_url });
+    return this.request('POST', '/api/recommendations', { ticker, content, recommender, target_user_id, image_url });
   },
   deleteTip(id) {
-    return this.request('DELETE', `/api/tips/${id}`);
+    return this.request('DELETE', `/api/recommendations/${id}`);
   },
   marketChart(ticker) {
     return this.request('GET', `/api/market/chart/${encodeURIComponent(ticker)}`);

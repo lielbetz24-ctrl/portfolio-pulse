@@ -130,43 +130,7 @@
       "created_by_user_id": "u_1779877088663_3d22893d"
     }
   ],
-  "tips": [
-    {
-      "id": "t1",
-      "advisor_id": "u_admin_avi",
-      "ticker": "NVDA",
-      "content": "מניית אנבידיה (NVDA) נסחרת במכפיל רווח גבוה. אם היא מעל 25% מהתיק — שקול מימוש רווחים חלקי.",
-      "date": "2026-05-27"
-    },
-    {
-      "id": "t2",
-      "advisor_id": "u_admin_avi",
-      "ticker": "AAPL",
-      "content": "אפל (AAPL) מציגה יציבות פיננסית חזקה. מניית עוגן מתאימה לתקופות אי-ודאות.",
-      "date": "2026-05-27"
-    },
-    {
-      "id": "t5",
-      "advisor_id": "u_admin_avi",
-      "ticker": null,
-      "content": "שמירה על 10%-15% מזומן בתיק מאפשרת לנצל ירידות שערים ללא מכירה בהפסד.",
-      "date": "2026-05-27"
-    },
-    {
-      "id": "t6",
-      "advisor_id": "u_admin_avi",
-      "ticker": null,
-      "content": "ביזור: הימנע מחשיפה מעל 20% למניה בודדת, ופזר בין סקטורים שונים.",
-      "date": "2026-05-27"
-    },
-    {
-      "id": "t_1779888282260_cf36cbc6",
-      "advisor_id": "u_admin_avi",
-      "ticker": null,
-      "content": "תקנו נבידיה!!!!!!!!!!1",
-      "date": "2026-05-27"
-    }
-  ],
+  "tips": [],
   "notifications": [],
   "subscriptions": [],
   "vapidKeys": {

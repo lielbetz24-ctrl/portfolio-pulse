@@ -465,12 +465,6 @@ function seedDb(db) {
     is_active: true,
     created_at: new Date().toISOString()
   });
-  db.tips.push(
-    { id: 't1', advisor_id: adminId, recommender: 'avi', ticker: 'NVDA', content: 'מניית אנבידיה (NVDA) נסחרת במכפיל רווח גבוה. אם היא מעל 25% מהתיק — שקול מימוש רווחים חלקי.', date: new Date().toISOString().split('T')[0] },
-    { id: 't2', advisor_id: adminId, recommender: 'avi', ticker: 'AAPL', content: 'אפל (AAPL) מציגה יציבות פיננסית חזקה. מניית עוגן מתאימה לתקופות אי-ודאות.', date: new Date().toISOString().split('T')[0] },
-    { id: 't5', advisor_id: adminId, recommender: 'ai', ticker: null, content: 'שמירה על 10%-15% מזומן בתיק מאפשרת לנצל ירידות שערים ללא מכירה בהפסד.', date: new Date().toISOString().split('T')[0] },
-    { id: 't6', advisor_id: adminId, recommender: 'ai', ticker: null, content: 'ביזור: הימנע מחשיפה מעל 20% למניה בודדת, ופזר בין סקטורים שונים.', date: new Date().toISOString().split('T')[0] }
-  );
   writeDb(db);
 }
 
@@ -604,12 +598,7 @@ async function fetchYahooChart(ticker) {
 }
 
 async function generateDailyAITips(db) {
-  const today = new Date().toISOString().split('T')[0];
-  const aiTips = db.tips.filter(t => t.date === today && t.recommender === 'ai');
-  
-  if (aiTips.length >= 3) {
-    return; // Already generated for today
-  }
+  return; // Disabled to prevent tips with target_user_id: null
   
   console.log(`[AI Tips Generator] Generating daily tips for ${today}...`);
   
@@ -942,7 +931,7 @@ async function handleApi(req, res, pathname, query) {
     }
   }
 
-  if (pathname === '/api/tips' && req.method === 'GET') {
+  if ((pathname === '/api/tips' || pathname === '/api/recommendations') && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const db = readDb();
     await generateDailyAITips(db);
@@ -962,7 +951,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { tips });
   }
 
-  if (pathname === '/api/tips' && req.method === 'POST') {
+  if ((pathname === '/api/tips' || pathname === '/api/recommendations') && req.method === 'POST') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
     if (!body.content?.trim()) return sendJson(res, 400, { error: 'נא להזין תוכן להמלצה' });
@@ -977,8 +966,13 @@ async function handleApi(req, res, pathname, query) {
       return sendJson(res, 403, { error: 'אין הרשאה לשלוח הודעה למשתמש אחר' });
     }
 
-    const db = readDb();
     const targetUserId = body.target_user_id || null;
+    // Enforce that all Admin recommendations must be associated with a specific client (no null target_user_id)
+    if (user.role === 'admin' && !isClientMessage && !targetUserId) {
+      return sendJson(res, 400, { error: 'נא לבחור לקוח יעד ספציפי עבור ההמלצה' });
+    }
+
+    const db = readDb();
     const tip = {
       id: uid('t'),
       advisor_id: user.role === 'admin' ? user.id : 'u_admin_avi',
@@ -1060,7 +1054,7 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 201, { tip });
   }
 
-  const tipDelete = pathname.match(/^\/api\/tips\/(.+)$/);
+  const tipDelete = pathname.match(/^\/api\/(?:tips|recommendations)\/(.+)$/);
   if (tipDelete && req.method === 'DELETE') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     if (user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
@@ -1335,6 +1329,8 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 const db = readDb();
+db.tips = []; // Perform clean sweep DELETE of all existing tips as requested
+writeDb(db);
 startDailyAITipsCron();
 server.listen(PORT, () => {
   console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
