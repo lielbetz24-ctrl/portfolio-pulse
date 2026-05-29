@@ -117,3 +117,10 @@ self.addEventListener('fetch', event => {
       })
   );
 });
+
+/* ==================== Keep-Alive OS Standby Wakeup ==================== */
+self.addEventListener('push', (event) => {
+  console.log('⭐⭐⭐ [Firebase SW] Push received, keeping Service Worker alive.');
+  // No additional manual notification rendering is needed here since Native WebPush handles it.
+  // The mere presence of this event listener signals the OS to wake and maintain this thread active.
+});
