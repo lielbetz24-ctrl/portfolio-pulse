@@ -251,7 +251,13 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
             title: title,
             body: body
           },
+          android: {
+            priority: "high"
+          },
           webpush: {
+            headers: {
+              "Urgency": "high"
+            },
             notification: {
               icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
               badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'

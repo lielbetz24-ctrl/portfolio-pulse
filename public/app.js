@@ -240,21 +240,25 @@ document.addEventListener("DOMContentLoaded", () => {
     // Register Service Worker for PWA only if notification permission is already granted
     if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js')
-                .then(reg => {
-                    console.log('Service Worker registered successfully:', reg.scope);
-                    reg.update();
-                })
-                .catch(err => console.error('Service Worker registration failed:', err));
+            // Unregister legacy sw.js if present to prevent service worker conflicts
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+                for (const registration of registrations) {
+                    if (registration.active && registration.active.scriptURL.includes('/sw.js')) {
+                        registration.unregister().then(success => {
+                            if (success) console.log('[Service Worker] Successfully unregistered legacy sw.js');
+                        });
+                    }
+                }
+            }).catch(err => console.warn('[Service Worker] Error clearing legacy registrations:', err));
 
-            // Register Firebase Messaging Service Worker and initialize Firebase SDK
+            // Register Unified Firebase Messaging & Caching Service Worker
             navigator.serviceWorker.register('/firebase-messaging-sw.js')
                 .then(reg => {
-                    console.log('Firebase Service Worker registered successfully:', reg.scope);
+                    console.log('[Service Worker] Unified Firebase/Caching SW registered successfully:', reg.scope);
                     reg.update();
                     initFirebase();
                 })
-                .catch(err => console.error('Firebase Service Worker registration failed:', err));
+                .catch(err => console.error('[Service Worker] Unified SW registration failed:', err));
         });
     }
 

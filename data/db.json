@@ -24,7 +24,7 @@
       "id": "p_1779877088730_29788219",
       "user_id": "u_1779877088663_3d22893d",
       "name": "תיק השקעות אישי",
-      "cash_balance": 0,
+      "cash_balance": 2007.55,
       "created_at": "2026-05-27T10:18:08.730Z"
     }
   ],
@@ -168,5 +168,9 @@
     }
   ],
   "notifications": [],
-  "subscriptions": []
+  "subscriptions": [],
+  "vapidKeys": {
+    "publicKey": "BG06wSl0OqXM4eG21-vE_6z5gYEgFPmG-TOs9am-2sY_YsGI29dj_qXMsuq4QYLuu3ODIgRFt_tTVTM9hUeiuYM",
+    "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQghzxPCCYzWNSKHknc\nDs3acmmtcxiipIqMQu+p+ERVDKuhRANCAARtOsEpdDqlzOHhttfrxP+s+YGBIBT5\nhvkzrPWpvtrGP2LBiNvXY/6lzLLquEGC7rtzgyIERbf7U1UzPYVHormD\n-----END PRIVATE KEY-----\n"
+  }
 }
