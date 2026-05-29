@@ -26,6 +26,24 @@ async function initFirebase() {
                 showToast(`${payload.notification.title}: ${payload.notification.body}`, 'success');
             }
         });
+
+        // Error Handling / Refresh monitoring: Listen to onTokenRefresh events
+        messaging.onTokenRefresh(async () => {
+            try {
+                console.log('[Firebase] onTokenRefresh fired! Retrieving new token...');
+                const refreshedToken = await messaging.getToken({
+                    vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
+                });
+                if (refreshedToken) {
+                    console.log('[Firebase] Sending refreshed token to server...', refreshedToken);
+                    await API.request('PUT', '/api/update-token', { fcm_token: refreshedToken });
+                    localStorage.setItem('last_fcm_token', refreshedToken);
+                    console.log('[Firebase] Refreshed token successfully updated.');
+                }
+            } catch (err) {
+                console.error('[Firebase] Failed to handle token refresh:', err);
+            }
+        });
     } catch (e) {
         console.warn('⚠️ [Firebase] Failed to initialize Firebase:', e);
     }
@@ -113,6 +131,60 @@ function formatTipTimestamp(dateOrString) {
         return `${hh}:${mm}, ${dd}/${MM}/${yyyy}`;
     } catch (e) {
         return dateOrString;
+    }
+}
+
+async function checkAndSelfHealPushNotifications() {
+    if (localStorage.getItem('push_notifications_enabled') !== 'true') return;
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+    if (Notification.permission !== 'granted') return;
+
+    try {
+        console.log('[Self-Healing] Push notifications are enabled. Checking health...');
+        const reg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+        
+        if (!messaging) {
+            await initFirebase();
+        }
+
+        if (messaging && reg) {
+            const fcmToken = await messaging.getToken({
+                serviceWorkerRegistration: reg,
+                vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
+            });
+
+            const lastSavedToken = localStorage.getItem('last_fcm_token');
+            if (fcmToken && fcmToken !== lastSavedToken) {
+                console.log('[Self-Healing] FCM Token is refreshed or changed. Self-healing database...', fcmToken);
+                await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
+                localStorage.setItem('last_fcm_token', fcmToken);
+                console.log('[Self-Healing] FCM Token successfully healed on server.');
+            } else {
+                console.log('[Self-Healing] Push status is fully healthy.');
+            }
+        } else if (!reg) {
+            console.warn('[Self-Healing] Active PWA Service Worker not registered! Self-healing registration...');
+            const newReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+            await newReg.update();
+            
+            if (!messaging) {
+                await initFirebase();
+            }
+            
+            if (messaging) {
+                const fcmToken = await messaging.getToken({
+                    serviceWorkerRegistration: newReg,
+                    vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
+                });
+                if (fcmToken) {
+                    await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
+                    localStorage.setItem('last_fcm_token', fcmToken);
+                    console.log('[Self-Healing] Successfully self-healed PWA Service Worker registration.');
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[Self-Healing] Push notifications health check encountered an error:', e);
     }
 }
 
@@ -524,6 +596,7 @@ async function setupAppForUser() {
     renderSidebarNavigation();
     await loadUserData();
     restoreNotificationSettings();
+    checkAndSelfHealPushNotifications().catch(e => console.error('[FCM Client] Self-healing failed:', e));
 
     if (currentUser.role === 'admin') {
         switchView('admin-dashboard');
@@ -3067,8 +3140,27 @@ function togglePushSubscription(event) {
         });
     } else {
         localStorage.setItem('push_notifications_enabled', 'false');
+        localStorage.removeItem('last_fcm_token');
         if (sidebarPrefs) sidebarPrefs.style.display = 'none';
         if (mobilePrefs) mobilePrefs.style.display = 'none';
+        
+        // Physical unregister of Service Workers on Toggle off
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(async registrations => {
+                for (const r of registrations) {
+                    await r.unregister();
+                    console.log('[FCM Client] Physical SW unregister completed successfully');
+                }
+            }).catch(err => {
+                console.error('[FCM Client] Failed to unregister SW physically:', err);
+            });
+        }
+
+        // Notify server to clean fcm_token mapping
+        API.request('POST', '/api/notifications/subscribe', {
+            fcm_token: '' // Empty token to unsubscribe on backend
+        }).catch(err => console.warn('[FCM Client] Backend unsubscribe request failed:', err));
+
         showToast('התראות דחיפה כובו במכשיר זה.', 'info');
     }
 }

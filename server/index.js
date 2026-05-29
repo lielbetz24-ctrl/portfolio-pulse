@@ -1117,11 +1117,13 @@ async function handleApi(req, res, pathname, query) {
     });
   }
 
-  if ((pathname === '/api/notifications/subscribe' || pathname === '/api/save-fcm-token') && req.method === 'POST') {
+  if (
+    ((pathname === '/api/notifications/subscribe' || pathname === '/api/save-fcm-token') && req.method === 'POST') ||
+    (pathname === '/api/update-token' && req.method === 'PUT')
+  ) {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     const body = await readBody(req);
     const { fcm_token } = body;
-    if (!fcm_token) return sendJson(res, 400, { error: 'fcm_token missing' });
 
     const db = readDb();
     db.subscriptions = db.subscriptions || [];
@@ -1129,12 +1131,14 @@ async function handleApi(req, res, pathname, query) {
     // Enforce 1:1 user-to-token mapping (DELETE all previous subscriptions for this user_id)
     db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
     
-    db.subscriptions.push({
-      id: uid('sub'),
-      user_id: user.id,
-      fcm_token: fcm_token,
-      created_at: new Date().toISOString()
-    });
+    if (fcm_token) {
+      db.subscriptions.push({
+        id: uid('sub'),
+        user_id: user.id,
+        fcm_token: fcm_token,
+        created_at: new Date().toISOString()
+      });
+    }
     writeDb(db);
 
     return sendJson(res, 200, { ok: true });
