@@ -244,9 +244,16 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
   return getGoogleAccessToken(serviceAccount)
     .then(accessToken => {
       const projectId = serviceAccount.project_id;
+      const targetToken = token;
       const payload = {
         message: {
-          token: token,
+          token: targetToken,
+          // הבלוק הזה קריטי כדי לעקוף את מנגנון ניהול הסוללה (Doze Mode) ברמת ה-OS
+          android: {
+            priority: "high",
+            ttl: "86400s" // שים לב לתוספת ה-'s' המייצגת שניות בתקן אנדרואיד
+          },
+          // הבלוק הזה אחראי על ציור ההתראה ברמת הדפדפן ללא צורך בהתערבות JavaScript
           webpush: {
             headers: {
               "Urgency": "high",
@@ -255,9 +262,9 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
             notification: {
               title: title,
               body: body,
-              icon: "https://portfolio-pulse-mux5.onrender.com/icons/icon-192x192.png",
-              badge: "https://portfolio-pulse-mux5.onrender.com/icons/icon-192x192.png",
-              click_action: "https://portfolio-pulse-mux5.onrender.com/tips"
+              icon: "/icons/icon-192x192.png", // ודא נתיב נכון
+              badge: "/icons/icon-72x72.png",
+              click_action: "https://portfolio-pulse-mux5.onrender.com/"
             }
           }
         }
