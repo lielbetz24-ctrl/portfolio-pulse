@@ -3,6 +3,7 @@
    ========================================================================== */
 
 let messaging = null;
+let firebaseConfigData = null;
 
 async function initFirebase() {
     try {
@@ -15,6 +16,7 @@ async function initFirebase() {
         // Initialize Firebase Compat SDK
         firebase.initializeApp(config);
         messaging = firebase.messaging();
+        firebaseConfigData = config;
         console.log('[Firebase] Successfully initialized Firebase Cloud Messaging!');
 
         // Foreground messages listener
@@ -2897,7 +2899,10 @@ function togglePushSubscription(event) {
                         }
 
                         if (messaging) {
-                            const fcmToken = await messaging.getToken({ serviceWorkerRegistration: reg });
+                            const fcmToken = await messaging.getToken({ 
+                                serviceWorkerRegistration: reg,
+                                vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
+                            });
                             console.log('[FCM Client] Token successfully retrieved:', fcmToken);
 
                             // Sync subscription on backend

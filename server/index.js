@@ -171,10 +171,147 @@ function writeDb(db) {
 
 const https = require('https');
 
-function sendFcmNotification(token, title, body, icon) {
+let oauthTokenCache = {
+  token: null,
+  expiry: 0
+};
+
+async function getGoogleAccessToken(serviceAccount) {
+  if (oauthTokenCache.token && Date.now() < oauthTokenCache.expiry) {
+    return oauthTokenCache.token;
+  }
+
+  const client_email = serviceAccount.client_email;
+  const private_key = serviceAccount.private_key;
+  
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  };
+
+  const base64url = (str) => Buffer.from(str).toString('base64url');
+  const tokenInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
+  
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(tokenInput), private_key);
+  const jwt = `${tokenInput}.${signature.toString('base64url')}`;
+
+  const postData = `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`;
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      method: 'POST',
+      hostname: 'oauth2.googleapis.com',
+      path: '/token',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            const data = JSON.parse(body);
+            oauthTokenCache = {
+              token: data.access_token,
+              expiry: Date.now() + (data.expires_in - 300) * 1000 // Expire 5 minutes early
+            };
+            resolve(data.access_token);
+          } catch (e) {
+            reject(new Error('Failed to parse OAuth response: ' + body));
+          }
+        } else {
+          reject(new Error(`OAuth request failed with ${res.statusCode}: ${body}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
+  return getGoogleAccessToken(serviceAccount)
+    .then(accessToken => {
+      const projectId = serviceAccount.project_id;
+      const payload = {
+        message: {
+          token: token,
+          notification: {
+            title: title,
+            body: body
+          },
+          webpush: {
+            notification: {
+              icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+              badge: 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
+            }
+          }
+        }
+      };
+
+      const payloadString = JSON.stringify(payload);
+
+      const options = {
+        method: 'POST',
+        hostname: 'fcm.googleapis.com',
+        path: `/v1/projects/${projectId}/messages:send`,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        }
+      };
+
+      return new Promise((resolve) => {
+        const req = https.request(options, (res) => {
+          let resBody = '';
+          res.on('data', chunk => resBody += chunk);
+          res.on('end', () => {
+            console.log(`[FCM v1 Service] Request status: ${res.statusCode}`);
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve({ success: true, response: JSON.parse(resBody) });
+            } else {
+              try {
+                const errJson = JSON.parse(resBody);
+                const errorCode = errJson.error?.status;
+                const isInvalid = ['UNREGISTERED', 'INVALID_ARGUMENT'].includes(errorCode) || (errJson.error?.details && JSON.stringify(errJson.error.details).includes('invalid'));
+                resolve({ success: false, error: errJson.error?.message || resBody, invalidToken: isInvalid, statusCode: res.statusCode });
+              } catch {
+                resolve({ success: false, error: resBody, statusCode: res.statusCode });
+              }
+            }
+          });
+        });
+
+        req.on('error', (err) => {
+          console.error('[FCM v1 Service] Connection error:', err.message);
+          resolve({ success: false, error: err.message });
+        });
+
+        req.write(payloadString);
+        req.end();
+      });
+    })
+    .catch(err => {
+      console.error('[FCM v1 Service] OAuth Token Error:', err.message);
+      return { success: false, error: err.message };
+    });
+}
+
+function sendFcmLegacyNotification(token, title, body, icon) {
   const serverKey = process.env.FIREBASE_SERVER_KEY;
   if (!serverKey) {
-    console.warn('[FCM] FIREBASE_SERVER_KEY is not defined. Skipping notification.');
+    console.warn('[FCM Legacy] FIREBASE_SERVER_KEY is not defined. Skipping notification.');
     return Promise.resolve({ success: false, error: 'FIREBASE_SERVER_KEY missing' });
   }
 
@@ -210,13 +347,13 @@ function sendFcmNotification(token, title, body, icon) {
       let resBody = '';
       res.on('data', chunk => resBody += chunk);
       res.on('end', () => {
-        console.log(`[FCM Service] Request status: ${res.statusCode}`);
+        console.log(`[FCM Legacy Service] Request status: ${res.statusCode}`);
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
             const parsed = JSON.parse(resBody);
             if (parsed.results && parsed.results[0] && parsed.results[0].error) {
               const fcmError = parsed.results[0].error;
-              console.warn(`[FCM Service] Delivery failed with error: ${fcmError}`);
+              console.warn(`[FCM Legacy Service] Delivery failed with error: ${fcmError}`);
               resolve({ success: false, error: fcmError, invalidToken: ['NotRegistered', 'InvalidRegistration'].includes(fcmError) });
             } else {
               resolve({ success: true, response: parsed });
@@ -231,13 +368,28 @@ function sendFcmNotification(token, title, body, icon) {
     });
 
     req.on('error', (err) => {
-      console.error('[FCM Service] Connection error:', err.message);
+      console.error('[FCM Legacy Service] Connection error:', err.message);
       resolve({ success: false, error: err.message });
     });
 
     req.write(payloadString);
     req.end();
   });
+}
+
+function sendFcmNotification(token, title, body, icon) {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      if (serviceAccount && serviceAccount.private_key && serviceAccount.client_email) {
+        return sendFcmV1Notification(serviceAccount, token, title, body, icon);
+      }
+    } catch (e) {
+      console.error('[FCM] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON:', e.message);
+    }
+  }
+
+  return sendFcmLegacyNotification(token, title, body, icon);
 }
 
 async function triggerFcmNotification(db, targetUserId, title, body) {
@@ -944,10 +1096,13 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/notifications/firebase-config' && req.method === 'GET') {
     return sendJson(res, 200, {
-      apiKey: process.env.FIREBASE_API_KEY || 'mock-api-key',
-      projectId: process.env.FIREBASE_PROJECT_ID || 'mock-project-id',
-      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || 'mock-sender-id',
-      appId: process.env.FIREBASE_APP_ID || 'mock-app-id'
+      apiKey: process.env.FIREBASE_API_KEY || 'AIzaSyCU1ANCETIoZxieZIoNMhnA-zl3jhyzv0U',
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || 'portfoliopulse-22795.firebaseapp.com',
+      projectId: process.env.FIREBASE_PROJECT_ID || 'portfoliopulse-22795',
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'portfoliopulse-22795.firebasestorage.app',
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '279949836627',
+      appId: process.env.FIREBASE_APP_ID || '1:279949836627:web:ec383103a14201373721a6',
+      vapidKey: process.env.FIREBASE_VAPID_KEY || 'BIXn8e91UdT-ayEW2x4qaLDQpLo5oWTkRjhCIPNpuYBPYMaSyN6tl42uSUtHJ0j3Eze2pFUQRigqbjLZMK3KKgE'
     });
   }
 
