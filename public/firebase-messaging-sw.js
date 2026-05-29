@@ -18,12 +18,7 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW context!');
 
-// Register background message interception synchronously
-messaging.onBackgroundMessage((payload) => {
-  console.log('⭐⭐⭐ [Firebase SW] Intercepted background push message (WebPush Native): ', payload);
-  // Manual showNotification call removed to prevent duplicate notifications.
-  // The Native WebPush protocol automatically handles rendering at the OS/Browser level.
-});
+
 
 // Handle notification click to focus active PWA or WebView window
 self.addEventListener('notificationclick', event => {
