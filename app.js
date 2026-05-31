@@ -1041,14 +1041,16 @@ function toggleHoldingDetails(idx, prefix) {
 }
 
 let holdingsSortOption = localStorage.getItem('holdings_sort_option') || 'market_value';
+let detailHoldingsSortOption = localStorage.getItem('detail_holdings_sort_option') || 'market_value';
 
-function sortHoldingsList(holdingsList) {
+function sortHoldingsList(holdingsList, tableId = 'holdings-table-body') {
+    const sortOption = (tableId === 'holdings-table-body') ? holdingsSortOption : detailHoldingsSortOption;
     return [...holdingsList].sort((a, b) => {
-        if (holdingsSortOption === 'daily_change') {
+        if (sortOption === 'daily_change') {
             const changeA = a.daily_change ?? (MOCK_STOCK_PRICES[a.ticker]?.change) ?? 0;
             const changeB = b.daily_change ?? (MOCK_STOCK_PRICES[b.ticker]?.change) ?? 0;
             return changeB - changeA;
-        } else if (holdingsSortOption === 'total_return') {
+        } else if (sortOption === 'total_return') {
             const pnlA = a.pnl_pct ?? a.change_since_purchase_pct ?? 0;
             const pnlB = b.pnl_pct ?? b.change_since_purchase_pct ?? 0;
             return pnlB - pnlA;
@@ -1067,6 +1069,19 @@ function handleHoldingsSortChange() {
     }
 }
 
+function handleDetailHoldingsSortChange() {
+    const sortSelect = document.getElementById('detail-holdings-sort-select');
+    if (sortSelect) {
+        detailHoldingsSortOption = sortSelect.value;
+        localStorage.setItem('detail_holdings_sort_option', detailHoldingsSortOption);
+    }
+    
+    // Refresh the client-detail holdings table
+    if (activeViewingClientId) {
+        viewClientPortfolio(activeViewingClientId);
+    }
+}
+
 function renderHoldingsTable(holdingsList) {
     const tableBody = document.getElementById('holdings-table-body');
     const countBadge = document.getElementById('holdings-count');
@@ -1077,7 +1092,7 @@ function renderHoldingsTable(holdingsList) {
         sortSelect.value = holdingsSortOption;
     }
 
-    countBadge.textContent = `${holdingsList.length} נכסים`;
+    if (countBadge) countBadge.textContent = `${holdingsList.length} נכסים`;
     tableBody.innerHTML = '';
 
     if (holdingsList.length === 0) {
@@ -1091,7 +1106,7 @@ function renderHoldingsTable(holdingsList) {
         return;
     }
 
-    const sortedList = sortHoldingsList(holdingsList);
+    const sortedList = sortHoldingsList(holdingsList, 'holdings-table-body');
 
     sortedList.forEach((holding, idx) => {
         tableBody.appendChild(buildHoldingMainRow(holding, idx, 'client'));
@@ -1102,11 +1117,33 @@ function renderHoldingsTable(holdingsList) {
 function renderHoldingsTableInto(tbodyElement, holdingsList, emptyMessage, prefix = 'admin-view') {
     if (!tbodyElement) return;
     tbodyElement.innerHTML = '';
+    
+    // Update badge and dropdown values automatically based on table type
+    if (tbodyElement.id === 'detail-holdings-table-body') {
+        const countBadge = document.getElementById('detail-holdings-count');
+        if (countBadge) {
+            countBadge.textContent = `${holdingsList.length} נכסים`;
+        }
+        const sortSelect = document.getElementById('detail-holdings-sort-select');
+        if (sortSelect) {
+            sortSelect.value = detailHoldingsSortOption;
+        }
+    } else if (tbodyElement.id === 'holdings-table-body') {
+        const countBadge = document.getElementById('holdings-count');
+        if (countBadge) {
+            countBadge.textContent = `${holdingsList.length} נכסים`;
+        }
+        const sortSelect = document.getElementById('holdings-sort-select');
+        if (sortSelect) {
+            sortSelect.value = holdingsSortOption;
+        }
+    }
+
     if (!holdingsList.length) {
         tbodyElement.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">${emptyMessage}</td></tr>`;
         return;
     }
-    const sortedList = sortHoldingsList(holdingsList);
+    const sortedList = sortHoldingsList(holdingsList, tbodyElement.id);
     sortedList.forEach((holding, idx) => {
         tbodyElement.appendChild(buildHoldingMainRow(holding, idx, prefix));
         tbodyElement.appendChild(buildHoldingDetailsRow(holding, idx, prefix));
