@@ -27,23 +27,8 @@ async function initFirebase() {
             }
         });
 
-        // Error Handling / Refresh monitoring: Listen to onTokenRefresh events
-        messaging.onTokenRefresh(async () => {
-            try {
-                console.log('[Firebase] onTokenRefresh fired! Retrieving new token...');
-                const refreshedToken = await messaging.getToken({
-                    vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
-                });
-                if (refreshedToken) {
-                    console.log('[Firebase] Sending refreshed token to server...', refreshedToken);
-                    await API.request('PUT', '/api/update-token', { fcm_token: refreshedToken });
-                    localStorage.setItem('last_fcm_token', refreshedToken);
-                    console.log('[Firebase] Refreshed token successfully updated.');
-                }
-            } catch (err) {
-                console.error('[Firebase] Failed to handle token refresh:', err);
-            }
-        });
+        // Deprecated messaging.onTokenRefresh removed for Firebase v10+ compatibility.
+        // Token retrieval and refreshing are handled robustly on startup and user setup via checkAndSelfHealPushNotifications.
     } catch (e) {
         console.warn('⚠️ [Firebase] Failed to initialize Firebase:', e);
     }
@@ -140,6 +125,7 @@ async function checkAndSelfHealPushNotifications() {
     if (Notification.permission !== 'granted') return;
 
     try {
+        await navigator.serviceWorker.ready;
         console.log('[Self-Healing] Push notifications are enabled. Checking health...');
         const reg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
         

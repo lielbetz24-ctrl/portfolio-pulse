@@ -27,23 +27,8 @@ async function initFirebase() {
             }
         });
 
-        // Token refresh listener
-        messaging.onTokenRefresh(async () => {
-            try {
-                console.log('[FCM Client] Token refreshed by Google natively! Retrieving new token...');
-                const reg = await navigator.serviceWorker.ready;
-                const refreshedToken = await messaging.getToken({
-                    serviceWorkerRegistration: reg,
-                    vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
-                });
-                console.log('[FCM Client] New refreshed token retrieved:', refreshedToken);
-                await API.request('POST', '/api/save-fcm-token', { fcm_token: refreshedToken });
-                localStorage.setItem('last_saved_fcm_token', refreshedToken);
-                console.log('[FCM Client] Refreshed token successfully updated on server!');
-            } catch (err) {
-                console.error('[Self-Healing Error] Error handling token refresh:', err);
-            }
-        });
+        // Deprecated messaging.onTokenRefresh removed for Firebase v10+ compatibility.
+        // Token retrieval and refreshing are handled robustly on startup and user setup via refreshPushSubscription.
     } catch (e) {
         console.error('[Self-Healing Error] Failed to initialize Firebase:', e);
     }
@@ -3072,6 +3057,7 @@ async function refreshPushSubscription(force = false) {
     }
 
     try {
+        await navigator.serviceWorker.ready;
         console.log('[Self-Healing] Registering/getting Firebase Service Worker...');
         const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
         console.log('[Self-Healing] Service Worker registration active:', reg.scope);
