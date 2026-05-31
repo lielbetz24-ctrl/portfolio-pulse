@@ -1310,7 +1310,7 @@ function getAuth(req) {
 }
 
 const PRICE_CACHE = {};
-const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes cache TTL
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 
 async function fetchYahooChart(ticker) {
   const normTicker = ticker.toUpperCase();
@@ -2486,7 +2486,7 @@ async function handleApi(req, res, pathname, query) {
     }
     
     const responsePayload = { prices, usdToIls };
-    cacheInstance.set(cacheKey, responsePayload, 60); // Cache for 60 seconds
+    cacheInstance.set(cacheKey, responsePayload, 300); // Cache for 300 seconds (5 minutes)
     return sendJson(res, 200, responsePayload);
   }
 
