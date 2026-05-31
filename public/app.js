@@ -2557,11 +2557,35 @@ async function viewClientPortfolio(clientId) {
         console.error('Failed to auto-refresh tips on client view:', e);
     }
 
-    // חישוב מדדי הלקוח
-    const metrics = calculatePortfolioMetrics(portfolio.id);
+    // חישוב מדדי הלקוח מהשרת (כדי להבטיח סנכרון מושלם עם ה-Backend)
+    let metrics;
+    try {
+        const response = await API.getPositions(clientId);
+        if (response && !response.error) {
+            metrics = {
+                cash_balance: response.cash_balance,
+                total_estimated_value: response.total_equity,
+                totalPnL: response.total_pnl,
+                totalPnLPct: response.total_pnl_pct,
+                totalDailyChangeUSD: response.daily_change_usd,
+                totalDailyChangePct: response.daily_change_pct,
+                holdingsList: response.holdings || []
+            };
+        }
+    } catch (e) {
+        console.error("Failed to load client positions summary from server:", e);
+    }
+
+    if (!metrics) {
+        // Fallback to client-side calculations in case of API failure
+        metrics = calculatePortfolioMetrics(portfolio.id);
+        metrics.total_estimated_value = calculateTotalEquity(portfolio.id);
+        metrics.totalDailyChangeUSD = metrics.totalDailyChangeUSD || 0;
+        metrics.totalDailyChangePct = metrics.totalDailyChangePct || 0;
+    }
 
     // מילוי מדדים
-    document.getElementById('detail-total-portfolio').textContent = formatCurrency(calculateTotalEquity(portfolio.id));
+    document.getElementById('detail-total-portfolio').textContent = formatCurrency(metrics.total_estimated_value);
     document.getElementById('detail-cash-balance').textContent = formatCurrency(metrics.cash_balance);
     
     const pnlEl = document.getElementById('detail-total-pnl');

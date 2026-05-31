@@ -4,6 +4,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
+const { calculateHoldingMetrics, calculatePortfolioTotals } = require('./utils/finance');
+
 let rateLimit;
 try {
   rateLimit = require('express-rate-limit');
@@ -1172,9 +1174,11 @@ async function syncPortfolioPositions(portfolioId, client) {
     if (stockRes.rows.length > 0) {
       const stock = stockRes.rows[0];
       current_price = Number(stock.price);
-      market_value = h.quantity * current_price;
-      pnl = market_value - (h.quantity * avg_buy_price);
-      pnl_pct = avg_buy_price > 0 ? (pnl / (h.quantity * avg_buy_price)) * 100 : 0;
+      
+      const metrics = calculateHoldingMetrics(h.quantity, avg_buy_price, current_price, Number(stock.change || 0), ticker);
+      market_value = metrics.market_value;
+      pnl = metrics.pnl;
+      pnl_pct = metrics.pnl_pct;
     }
     
     await client.query(`
@@ -1759,14 +1763,19 @@ async function handleApi(req, res, pathname, query) {
   if (pathname === '/api/positions' && req.method === 'GET') {
     if (!user) return sendJson(res, 401, { error: 'נדרשת התחברות' });
     
+    let targetUserId = user.id;
+    if (user.role === 'admin' && query.get('userId')) {
+      targetUserId = query.get('userId');
+    }
+    
     if (isPgActive) {
       const client = await pool.connect();
       try {
-        let portRes = await client.query('SELECT * FROM portfolios WHERE user_id = $1', [user.id]);
+        let portRes = await client.query('SELECT * FROM portfolios WHERE user_id = $1', [targetUserId]);
         let portfolio = portRes.rows[0];
         if (!portfolio) {
           const pId = uid('p');
-          await client.query('INSERT INTO portfolios (id, user_id, name, cash_balance) VALUES ($1, $2, $3, $4)', [pId, user.id, 'תיק השקעות אישי', 0]);
+          await client.query('INSERT INTO portfolios (id, user_id, name, cash_balance) VALUES ($1, $2, $3, $4)', [pId, targetUserId, 'תיק השקעות אישי', 0]);
           portRes = await client.query('SELECT * FROM portfolios WHERE id = $1', [pId]);
           portfolio = portRes.rows[0];
         }
@@ -1780,57 +1789,44 @@ async function handleApi(req, res, pathname, query) {
           WHERE p.portfolio_id = $1
         `, [portfolio.id]);
 
-        const holdings = posRes.rows.map(r => ({
-          ticker: r.ticker,
-          name: r.stock_name || r.ticker,
-          quantity: Number(r.quantity),
-          avg_buy_price: Number(r.avg_buy_price),
-          current_price: r.current_price !== null ? Number(r.current_price) : null,
-          market_value: r.market_value !== null ? Number(r.market_value) : null,
-          pnl: r.pnl !== null ? Number(r.pnl) : null,
-          pnl_pct: r.pnl_pct !== null ? Number(r.pnl_pct) : null,
-          daily_change: r.daily_change !== null ? Number(r.daily_change) : null
-        }));
+        const holdings = posRes.rows.map(r => {
+          const metrics = calculateHoldingMetrics(
+            r.quantity,
+            r.avg_buy_price,
+            r.current_price,
+            r.daily_change,
+            r.ticker
+          );
 
-        const cash_balance = Number(portfolio.cash_balance);
-        let total_stock_value = 0;
-        let total_cost = 0;
-        let total_pnl = 0;
-        
-        let daily_change_usd = 0;
-        let total_prev_stock_value = 0;
-
-        holdings.forEach(h => {
-          if (h.market_value !== null) {
-            total_stock_value += h.market_value;
-            total_cost += h.quantity * h.avg_buy_price;
-            total_pnl += h.pnl;
-            
-            if (h.daily_change !== null && h.current_price !== null) {
-              const change = h.daily_change;
-              const prevClose = h.current_price / (1 + change / 100);
-              daily_change_usd += h.quantity * (h.current_price - prevClose);
-              total_prev_stock_value += h.quantity * prevClose;
-            }
-          }
+          return {
+            ticker: r.ticker,
+            name: r.stock_name || r.ticker,
+            quantity: Number(r.quantity),
+            avg_buy_price: Number(r.avg_buy_price),
+            current_price: r.current_price !== null ? Number(r.current_price) : null,
+            market_value: metrics.market_value,
+            pnl: metrics.pnl,
+            pnl_pct: metrics.pnl_pct,
+            daily_change: r.daily_change !== null ? Number(r.daily_change) : null,
+            daily_change_usd: metrics.daily_change_usd,
+            prev_stock_value: metrics.prev_stock_value
+          };
         });
 
-        const total_equity = cash_balance + total_stock_value;
-        const total_pnl_pct = total_cost > 0 ? (total_pnl / total_cost) * 100 : 0;
-        const daily_change_pct = total_prev_stock_value > 0 ? (daily_change_usd / total_prev_stock_value) * 100 : 0;
+        const totals = calculatePortfolioTotals(portfolio.cash_balance, holdings);
 
         client.release();
 
         return sendJson(res, 200, {
           portfolio_id: portfolio.id,
           portfolio_name: portfolio.name,
-          cash_balance,
-          total_stock_value,
-          total_equity,
-          total_pnl,
-          total_pnl_pct,
-          daily_change_usd,
-          daily_change_pct,
+          cash_balance: totals.cash_balance,
+          total_stock_value: totals.total_stock_value,
+          total_equity: totals.total_equity,
+          total_pnl: totals.total_pnl,
+          total_pnl_pct: totals.total_pnl_pct,
+          daily_change_usd: totals.daily_change_usd,
+          daily_change_pct: totals.daily_change_pct,
           holdings
         });
       } catch (err) {
@@ -1839,9 +1835,9 @@ async function handleApi(req, res, pathname, query) {
       }
     } else {
       const db = readDb();
-      let portfolio = db.portfolios.find(p => p.user_id === user.id);
+      let portfolio = db.portfolios.find(p => p.user_id === targetUserId);
       if (!portfolio) {
-        portfolio = { id: uid('p'), user_id: user.id, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() };
+        portfolio = { id: uid('p'), user_id: targetUserId, name: 'תיק השקעות אישי', cash_balance: 0, created_at: new Date().toISOString() };
         db.portfolios.push(portfolio);
         writeDb(db);
       }
@@ -1872,12 +1868,6 @@ async function handleApi(req, res, pathname, query) {
       }
 
       const holdings = [];
-      const cash_balance = Number(portfolio.cash_balance);
-      let total_stock_value = 0;
-      let total_cost = 0;
-      let total_pnl = 0;
-      let daily_change_usd = 0;
-      let total_prev_stock_value = 0;
 
       for (const ticker in holdingsMap) {
         const h = holdingsMap[ticker];
@@ -1886,28 +1876,22 @@ async function handleApi(req, res, pathname, query) {
         const cached = PRICE_CACHE[ticker];
         let name = ticker;
         let current_price = null;
-        let market_value = null;
-        let pnl = null;
-        let pnl_pct = null;
         let daily_change = null;
 
         if (cached && cached.data) {
           const stock = cached.data;
           name = stock.name || ticker;
           current_price = Number(stock.price);
-          market_value = h.quantity * current_price;
-          pnl = market_value - (h.quantity * avg_buy_price);
-          pnl_pct = avg_buy_price > 0 ? (pnl / (h.quantity * avg_buy_price)) * 100 : 0;
           daily_change = Number(stock.change || 0);
-
-          total_stock_value += market_value;
-          total_cost += h.quantity * avg_buy_price;
-          total_pnl += pnl;
-
-          const prevClose = current_price / (1 + daily_change / 100);
-          daily_change_usd += h.quantity * (current_price - prevClose);
-          total_prev_stock_value += h.quantity * prevClose;
         }
+
+        const metrics = calculateHoldingMetrics(
+          h.quantity,
+          avg_buy_price,
+          current_price,
+          daily_change,
+          ticker
+        );
 
         holdings.push({
           ticker,
@@ -1915,27 +1899,27 @@ async function handleApi(req, res, pathname, query) {
           quantity: h.quantity,
           avg_buy_price,
           current_price,
-          market_value,
-          pnl,
-          pnl_pct,
-          daily_change
+          market_value: metrics.market_value,
+          pnl: metrics.pnl,
+          pnl_pct: metrics.pnl_pct,
+          daily_change,
+          daily_change_usd: metrics.daily_change_usd,
+          prev_stock_value: metrics.prev_stock_value
         });
       }
 
-      const total_equity = cash_balance + total_stock_value;
-      const total_pnl_pct = total_cost > 0 ? (total_pnl / total_cost) * 100 : 0;
-      const daily_change_pct = total_prev_stock_value > 0 ? (daily_change_usd / total_prev_stock_value) * 100 : 0;
+      const totals = calculatePortfolioTotals(portfolio.cash_balance, holdings);
 
       return sendJson(res, 200, {
         portfolio_id: portfolio.id,
         portfolio_name: portfolio.name,
-        cash_balance,
-        total_stock_value,
-        total_equity,
-        total_pnl,
-        total_pnl_pct,
-        daily_change_usd,
-        daily_change_pct,
+        cash_balance: totals.cash_balance,
+        total_stock_value: totals.total_stock_value,
+        total_equity: totals.total_equity,
+        total_pnl: totals.total_pnl,
+        total_pnl_pct: totals.total_pnl_pct,
+        daily_change_usd: totals.daily_change_usd,
+        daily_change_pct: totals.daily_change_pct,
         holdings
       });
     }
