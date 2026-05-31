@@ -4,6 +4,61 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
+let rateLimit;
+try {
+  rateLimit = require('express-rate-limit');
+} catch (e) {
+  console.warn('[Warning] express-rate-limit module not installed locally. Falling back to built-in fallback rate limiter.');
+}
+
+let apiLimiter;
+
+if (rateLimit) {
+  apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    keyGenerator: (req) => {
+      return req.ip || req.socket.remoteAddress || 'unknown';
+    },
+    handler: (req, res, next, options) => {
+      res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        error: 'Too Many Requests',
+        message: 'ביצעת כמות גדולה מדי של בקשות בפרק זמן קצר. אנא נסה שוב בעוד 15 דקות.'
+      }));
+    }
+  });
+} else {
+  // Built-in robust fallback rate limiter mimicking express-rate-limit for local/dev envs
+  const fallbackStore = new Map();
+  apiLimiter = (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000;
+    const maxRequests = 100;
+
+    if (!fallbackStore.has(ip)) {
+      fallbackStore.set(ip, []);
+    }
+
+    const timestamps = fallbackStore.get(ip);
+    const validTimestamps = timestamps.filter(t => now - t < windowMs);
+
+    if (validTimestamps.length >= maxRequests) {
+      res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        error: 'Too Many Requests',
+        message: 'ביצעת כמות גדולה מדי של בקשות בפרק זמן קצר. אנא נסה שוב בעוד 15 דקות.'
+      }));
+      return;
+    }
+
+    validTimestamps.push(now);
+    fallbackStore.set(ip, validTimestamps);
+    next();
+  };
+}
+
 const { Pool, types } = require('pg');
 
 // Force DECIMAL/NUMERIC (OID 1700) to be parsed as native JavaScript floats rather than string objects
@@ -2536,6 +2591,23 @@ async function handleApi(req, res, pathname, query) {
     console.log(`[Request] ${req.method} ${pathname}`);
 
     if (pathname.startsWith('/api/')) {
+      let isRateLimitPassed = false;
+      req.ip = req.socket.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
+
+      await new Promise((resolve) => {
+        apiLimiter(req, res, () => {
+          isRateLimitPassed = true;
+          resolve();
+        });
+        if (res.writableEnded) {
+          resolve();
+        }
+      });
+
+      if (!isRateLimitPassed || res.writableEnded) {
+        return; // Blocked by rate limiter
+      }
+
       return await handleApi(req, res, pathname, url.searchParams);
     }
 
