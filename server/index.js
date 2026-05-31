@@ -2591,6 +2591,14 @@ async function handleApi(req, res, pathname, query) {
     console.log(`[Request] ${req.method} ${pathname}`);
 
     if (pathname.startsWith('/api/')) {
+      const apiStart = Date.now();
+      res.on('finish', () => {
+        const duration = Date.now() - apiStart;
+        if (duration > 500) {
+          console.warn(`[Performance Warning] Slow Request: ${req.url} took ${duration}ms`);
+        }
+      });
+
       let isRateLimitPassed = false;
       req.ip = req.socket.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
 
