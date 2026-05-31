@@ -59,6 +59,38 @@ if (rateLimit) {
   };
 }
 
+let NodeCache;
+try {
+  NodeCache = require('node-cache');
+} catch (e) {
+  console.warn('[Warning] node-cache module not installed locally. Falling back to built-in memory store.');
+}
+
+let cacheInstance;
+if (NodeCache) {
+  cacheInstance = new NodeCache({ stdTTL: 60, checkperiod: 120 });
+} else {
+  // Built-in simple cache store fallback mimicking node-cache API for local/dev envs
+  const fallbackStore = new Map();
+  cacheInstance = {
+    get: (key) => {
+      const entry = fallbackStore.get(key);
+      if (!entry) return undefined;
+      if (Date.now() > entry.expiry) {
+        fallbackStore.delete(key);
+        return undefined;
+      }
+      return entry.value;
+    },
+    set: (key, value, ttl = 60) => {
+      fallbackStore.set(key, {
+        value,
+        expiry: Date.now() + ttl * 1000
+      });
+    }
+  };
+}
+
 const { Pool, types } = require('pg');
 
 // Force DECIMAL/NUMERIC (OID 1700) to be parsed as native JavaScript floats rather than string objects
@@ -2416,6 +2448,15 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/market/prices' && req.method === 'GET') {
     const tickers = (query.get('tickers') || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    
+    // Check in-memory cache first
+    const cacheKey = 'prices_' + tickers.slice().sort().join(',');
+    const cachedData = cacheInstance.get(cacheKey);
+    if (cachedData) {
+      console.log(`[Cache Hit] Serving market prices from in-memory cache for key: ${cacheKey}`);
+      return sendJson(res, 200, cachedData);
+    }
+
     const prices = {};
     await Promise.all(tickers.map(async (ticker) => {
       try {
@@ -2432,13 +2473,24 @@ async function handleApi(req, res, pathname, query) {
     } catch (e) {
       console.log('[Market Prices API] Failed to fetch USD/ILS exchange rate:', e.message);
     }
-    return sendJson(res, 200, { prices, usdToIls });
+    
+    const responsePayload = { prices, usdToIls };
+    cacheInstance.set(cacheKey, responsePayload, 60); // Cache for 60 seconds
+    return sendJson(res, 200, responsePayload);
   }
 
   if (pathname === '/api/market/search' && req.method === 'GET') {
     const q = (query.get('q') || '').trim();
     if (!q) {
       return sendJson(res, 200, { quotes: [] });
+    }
+    
+    // Check in-memory cache first
+    const cacheKey = 'search_' + q.toLowerCase();
+    const cachedData = cacheInstance.get(cacheKey);
+    if (cachedData) {
+      console.log(`[Cache Hit] Serving search results from in-memory cache for key: ${cacheKey}`);
+      return sendJson(res, 200, cachedData);
     }
     
     if (isPgActive) {
@@ -2519,7 +2571,9 @@ async function handleApi(req, res, pathname, query) {
           })().catch(err => console.error('[Lazy Loading Async Error] Unhandled background error:', err));
         }
         
-        return sendJson(res, 200, { quotes: quotes.slice(0, 12) });
+        const responsePayload = { quotes: quotes.slice(0, 12) };
+        cacheInstance.set(cacheKey, responsePayload, 60); // Cache for 60 seconds
+        return sendJson(res, 200, responsePayload);
       } catch (e) {
         if (client) client.release();
         return sendJson(res, 500, { error: e.message, quotes: [] });
@@ -2579,7 +2633,9 @@ async function handleApi(req, res, pathname, query) {
           });
         }
       }
-      return sendJson(res, 200, { quotes: quotes.slice(0, 12) });
+      const responsePayload = { quotes: quotes.slice(0, 12) };
+      cacheInstance.set(cacheKey, responsePayload, 60); // Cache for 60 seconds
+      return sendJson(res, 200, responsePayload);
     }
   }
 
