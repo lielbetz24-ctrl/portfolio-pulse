@@ -403,6 +403,24 @@ async function migrateJsonToPostgres(pool) {
       tickersToSync.set(item.ticker.toUpperCase(), item.name);
     });
 
+    // Merge rich catalog from all_stocks.json if present
+    const richCatalogPath = path.join(__dirname, '..', 'data', 'all_stocks.json');
+    if (fs.existsSync(richCatalogPath)) {
+      try {
+        const richRaw = fs.readFileSync(richCatalogPath, 'utf8');
+        const richCatalog = JSON.parse(richRaw);
+        console.log(`[Migration] Found rich catalog with ${richCatalog.length} stocks in all_stocks.json.`);
+        richCatalog.forEach(item => {
+          const ticker = item.ticker.toUpperCase();
+          if (!tickersToSync.has(ticker)) {
+            tickersToSync.set(ticker, item.name);
+          }
+        });
+      } catch (richErr) {
+        console.error('[Migration Warning] Failed to parse all_stocks.json:', richErr.message);
+      }
+    }
+
     if (db.transactions) {
       db.transactions.forEach(tx => {
         if (tx.ticker) {

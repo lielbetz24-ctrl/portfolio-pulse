@@ -139,6 +139,24 @@ async function runSync() {
         tickersToSync.set(ticker, item.name);
       }
     });
+
+    // Merge rich catalog from all_stocks.json if present
+    const richCatalogPath = path.join(ROOT, 'data', 'all_stocks.json');
+    if (fs.existsSync(richCatalogPath)) {
+      try {
+        const richRaw = fs.readFileSync(richCatalogPath, 'utf8');
+        const richCatalog = JSON.parse(richRaw);
+        console.log(`[Inventory Sync] Found rich catalog with ${richCatalog.length} stocks in all_stocks.json.`);
+        richCatalog.forEach(item => {
+          const ticker = item.ticker.toUpperCase();
+          if (!tickersToSync.has(ticker)) {
+            tickersToSync.set(ticker, item.name);
+          }
+        });
+      } catch (richErr) {
+        console.error('[Inventory Sync Warning] Failed to parse all_stocks.json:', richErr.message);
+      }
+    }
     
     console.log(`[Inventory Sync] Combined list has ${tickersToSync.size} unique stock tickers.`);
     
