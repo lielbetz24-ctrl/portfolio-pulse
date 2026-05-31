@@ -11,7 +11,7 @@ console.log(`[Migration] Database connection string: ${connectionString}`);
 const pool = new Pool({
   connectionString,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-  max: 5,
+  max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
 });

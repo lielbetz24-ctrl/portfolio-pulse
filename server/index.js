@@ -129,7 +129,7 @@ const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:post
 const pool = new Pool({
   connectionString,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-  max: 20, // Max clients in connection pool
+  max: 50, // Max clients in connection pool
   idleTimeoutMillis: 30000, // Close idle connections after 30s
   connectionTimeoutMillis: 5000 // Fail fast if database connection hangs
 });
