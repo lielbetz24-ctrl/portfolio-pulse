@@ -1010,7 +1010,8 @@ async function triggerFcmNotification(db, targetUserId, title, body) {
   if (targetUserId) {
     targets = db.subscriptions.filter(s => s.user_id === targetUserId);
   } else {
-    targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
+    const adminIds = db.users.filter(u => u.role === 'admin').map(u => u.id);
+    targets = db.subscriptions.filter(s => !adminIds.includes(s.user_id));
   }
 
   // Deduplicate target records by FCM token/endpoint to guarantee we never send twice to the same device
@@ -2221,10 +2222,19 @@ async function handleApi(req, res, pathname, query) {
             
             let targets = [];
             if (targetUser) {
-              const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id = $1', [targetUser]);
-              targets = subRes.rows;
+              if (targetUser === 'u_admin_avi') {
+                // Notify all active administrators
+                const adminRes = await pool.query("SELECT id FROM users WHERE role = 'admin'");
+                const adminIds = adminRes.rows.map(r => r.id);
+                const subRes = await pool.query("SELECT * FROM subscriptions WHERE user_id = ANY($1)", [adminIds]);
+                targets = subRes.rows;
+              } else {
+                const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id = $1', [targetUser]);
+                targets = subRes.rows;
+              }
             } else {
-              const subRes = await pool.query('SELECT * FROM subscriptions WHERE user_id != $1', ['u_admin_avi']);
+              // Exclude all administrators from general notifications
+              const subRes = await pool.query("SELECT * FROM subscriptions WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'admin')");
               targets = subRes.rows;
             }
             
@@ -2279,9 +2289,15 @@ async function handleApi(req, res, pathname, query) {
           
           let targets = [];
           if (targetUser) {
-            targets = db.subscriptions.filter(s => s.user_id === targetUser);
+            if (targetUser === 'u_admin_avi') {
+              const adminIds = db.users.filter(u => u.role === 'admin').map(u => u.id);
+              targets = db.subscriptions.filter(s => adminIds.includes(s.user_id));
+            } else {
+              targets = db.subscriptions.filter(s => s.user_id === targetUser);
+            }
           } else {
-            targets = db.subscriptions.filter(s => s.user_id !== 'u_admin_avi');
+            const adminIds = db.users.filter(u => u.role === 'admin').map(u => u.id);
+            targets = db.subscriptions.filter(s => !adminIds.includes(s.user_id));
           }
           
           for (const s of targets) {
@@ -2813,10 +2829,13 @@ server.on('upgrade', (req, socket, head) => {
                     [msg.userId]
                   );
                   if (updateRes.rowCount > 0) {
-                    sendWebSocketMessage('u_admin_avi', {
-                      type: 'messages_read',
-                      userId: msg.userId
-                    });
+                    const adminRes = await pool.query("SELECT id FROM users WHERE role = 'admin'");
+                    for (const r of adminRes.rows) {
+                      sendWebSocketMessage(r.id, {
+                        type: 'messages_read',
+                        userId: msg.userId
+                      });
+                    }
                   }
                 } catch (wsErr) {
                   console.error('[WS Error] Failed to update read messages in PostgreSQL:', wsErr.message);
@@ -2833,10 +2852,13 @@ server.on('upgrade', (req, socket, head) => {
                 });
                 if (updated) {
                   writeDb(db);
-                  sendWebSocketMessage('u_admin_avi', {
-                    type: 'messages_read',
-                    userId: msg.userId
-                  });
+                  const adminIds = db.users.filter(u => u.role === 'admin').map(u => u.id);
+                  for (const adminId of adminIds) {
+                    sendWebSocketMessage(adminId, {
+                      type: 'messages_read',
+                      userId: msg.userId
+                    });
+                  }
                 }
               }
             }
