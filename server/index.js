@@ -12,7 +12,15 @@ types.setTypeParser(1700, val => parseFloat(val));
 const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/portfolio_pulse';
 const pool = new Pool({
   connectionString,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 20, // Max clients in connection pool
+  idleTimeoutMillis: 30000, // Close idle connections after 30s
+  connectionTimeoutMillis: 5000 // Fail fast if database connection hangs
+});
+
+// Robust error handler to swallow idle connection drops and prevent Node process crashes
+pool.on('error', (err) => {
+  console.error('[Database Pool Error] Momentary connection loss or PostgreSQL error:', err.message);
 });
 
 let isPgActive = false;
@@ -110,6 +118,8 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
 
         CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
         CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
+        CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
+        CREATE INDEX IF NOT EXISTS idx_transactions_created_by_user_id ON transactions (created_by_user_id);
 
         CREATE TABLE IF NOT EXISTS positions (
           portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,

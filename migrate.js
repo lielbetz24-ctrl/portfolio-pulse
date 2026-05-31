@@ -10,7 +10,14 @@ console.log(`[Migration] Database connection string: ${connectionString}`);
 
 const pool = new Pool({
   connectionString,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
+});
+
+pool.on('error', (err) => {
+  console.error('[Migration Pool Error] Momentary connection loss or PostgreSQL error:', err.message);
 });
 
 async function run() {
@@ -30,7 +37,26 @@ async function run() {
     return;
   }
   
-  const client = await pool.connect();
+  let client;
+  const retries = 5;
+  const delayMs = 5000;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Migration] Connecting to PostgreSQL (Attempt ${attempt}/${retries})...`);
+      client = await pool.connect();
+      break;
+    } catch (err) {
+      console.error(`[Migration Warning] Connection attempt ${attempt} failed:`, err.message);
+      if (attempt < retries) {
+        console.log(`[Migration] Waiting ${delayMs / 1000} seconds before retrying...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } else {
+        console.error('[Migration Error] All connection attempts failed. Exiting.');
+        process.exit(1);
+      }
+    }
+  }
+  
   try {
     console.log('[Migration] Creating database tables...');
     await client.query('BEGIN');
@@ -112,6 +138,8 @@ async function run() {
 
       CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
       CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
+      CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
+      CREATE INDEX IF NOT EXISTS idx_transactions_created_by_user_id ON transactions (created_by_user_id);
 
       CREATE TABLE IF NOT EXISTS positions (
         portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,

@@ -10,7 +10,14 @@ console.log(`[Recovery] Database connection string: ${connectionString}`);
 
 const pool = new Pool({
   connectionString,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
+});
+
+pool.on('error', (err) => {
+  console.error('[Recovery Pool Error] Momentary connection loss or PostgreSQL error:', err.message);
 });
 
 async function runRecovery() {

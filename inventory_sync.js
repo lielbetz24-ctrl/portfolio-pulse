@@ -10,7 +10,14 @@ console.log(`[Inventory Sync] Connecting to: ${connectionString}`);
 
 const pool = new Pool({
   connectionString,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
+});
+
+pool.on('error', (err) => {
+  console.error('[Inventory Sync Pool Error] Momentary connection loss or PostgreSQL error:', err.message);
 });
 
 // Default stock database from SEMANTIC_STOCK_DATABASE in app.js
