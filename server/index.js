@@ -15,10 +15,33 @@ try {
 
 let apiLimiter;
 
+const isWhitelistedIP = (ip) => {
+  if (!ip) return false;
+  // Clean IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 -> 127.0.0.1)
+  const cleanIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+  return (
+    cleanIp === '127.0.0.1' ||
+    cleanIp === '::1' ||
+    cleanIp === 'localhost' ||
+    cleanIp.startsWith('10.') ||
+    cleanIp.startsWith('192.168.') ||
+    (cleanIp.startsWith('172.') && (() => {
+      const parts = cleanIp.split('.');
+      if (parts.length < 2) return false;
+      const secondOctet = parseInt(parts[1], 10);
+      return secondOctet >= 16 && secondOctet <= 31;
+    })())
+  );
+};
+
 if (rateLimit) {
   apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+    max: 300, // Limit each IP to 300 requests per windowMs
+    skip: (req) => {
+      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      return isWhitelistedIP(ip);
+    },
     keyGenerator: (req) => {
       return req.ip || req.socket.remoteAddress || 'unknown';
     },
@@ -35,9 +58,13 @@ if (rateLimit) {
   const fallbackStore = new Map();
   apiLimiter = (req, res, next) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (isWhitelistedIP(ip)) {
+      return next(); // Skip rate limit for localhost / development
+    }
+
     const now = Date.now();
     const windowMs = 15 * 60 * 1000;
-    const maxRequests = 100;
+    const maxRequests = 300;
 
     if (!fallbackStore.has(ip)) {
       fallbackStore.set(ip, []);
