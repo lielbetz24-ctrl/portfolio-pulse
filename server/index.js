@@ -37,7 +37,7 @@ const isWhitelistedIP = (ip) => {
 if (rateLimit) {
   apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 300, // Limit each IP to 300 requests per windowMs
+    max: 500, // Limit each IP to 500 requests per windowMs
     skip: (req) => {
       const ip = req.ip || req.socket.remoteAddress || 'unknown';
       return isWhitelistedIP(ip);
@@ -64,7 +64,7 @@ if (rateLimit) {
 
     const now = Date.now();
     const windowMs = 15 * 60 * 1000;
-    const maxRequests = 300;
+    const maxRequests = 500;
 
     if (!fallbackStore.has(ip)) {
       fallbackStore.set(ip, []);
