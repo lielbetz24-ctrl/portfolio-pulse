@@ -331,6 +331,75 @@ async function migrateJsonToPostgres(pool) {
           s.fcm_token,
           s.created_at || new Date().toISOString()
         ]);
+    }
+
+    // 7. Seed stocks table from SEMANTIC_STOCK_DATABASE catalog + JSON transactions/tips
+    const DEFAULT_CATALOG = [
+      { ticker: 'AAPL', name: 'Apple Inc.' },
+      { ticker: 'NVDA', name: 'NVIDIA Corp.' },
+      { ticker: 'TSLA', name: 'Tesla Inc.' },
+      { ticker: 'MSFT', name: 'Microsoft Corp.' },
+      { ticker: 'GOOGL', name: 'Alphabet Inc.' },
+      { ticker: 'AMZN', name: 'Amazon.com Inc.' },
+      { ticker: 'META', name: 'Meta Platforms Inc.' },
+      { ticker: 'NFLX', name: 'Netflix Inc.' },
+      { ticker: 'AMD', name: 'Advanced Micro Devices Inc.' },
+      { ticker: 'INTC', name: 'Intel Corp.' },
+      { ticker: 'TSM', name: 'Taiwan Semiconductor Manufacturing' },
+      { ticker: 'BRK-B', name: 'Berkshire Hathaway Inc.' },
+      { ticker: 'JPM', name: 'JPMorgan Chase & Co.' },
+      { ticker: 'V', name: 'Visa Inc.' },
+      { ticker: 'DIS', name: 'The Walt Disney Co.' },
+      { ticker: 'SBUX', name: 'Starbucks Corp.' },
+      { ticker: 'KO', name: 'The Coca-Cola Co.' },
+      { ticker: 'NKE', name: 'Nike Inc.' },
+      { ticker: 'XOM', name: 'Exxon Mobil Corp.' },
+      { ticker: 'LLY', name: 'Eli Lilly & Co.' }
+    ];
+
+    const tickersToSync = new Map();
+    DEFAULT_CATALOG.forEach(item => {
+      tickersToSync.set(item.ticker.toUpperCase(), item.name);
+    });
+
+    if (db.transactions) {
+      db.transactions.forEach(tx => {
+        if (tx.ticker) {
+          const ticker = tx.ticker.toUpperCase();
+          if (!tickersToSync.has(ticker)) {
+            tickersToSync.set(ticker, ticker);
+          }
+        }
+      });
+    }
+
+    if (db.tips) {
+      db.tips.forEach(tip => {
+        if (tip.ticker) {
+          const ticker = tip.ticker.toUpperCase();
+          if (!tickersToSync.has(ticker)) {
+            tickersToSync.set(ticker, ticker);
+          }
+        }
+      });
+    }
+
+    console.log(`[Migration] Seeding/Syncing ${tickersToSync.size} stock symbols into "stocks" table...`);
+    for (const [ticker, defaultName] of tickersToSync.entries()) {
+      const existRes = await client.query('SELECT ticker FROM stocks WHERE ticker = $1', [ticker]);
+      if (existRes.rows.length === 0) {
+        const cached = PRICE_CACHE[ticker];
+        const name = (cached && cached.data && cached.data.name) || defaultName;
+        const price = (cached && cached.data && cached.data.price) || 0;
+        const change = (cached && cached.data && cached.data.change) || 0;
+        const currency = (cached && cached.data && cached.data.currency) || 'USD';
+        const prevClose = (cached && cached.data && cached.data.previousClose) || 0;
+        
+        await client.query(`
+          INSERT INTO stocks (ticker, name, price, change, currency, previous_close)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (ticker) DO NOTHING
+        `, [ticker, name, price, change, currency, prevClose]);
       }
     }
 
@@ -973,7 +1042,13 @@ async function updateAllStockPricesJob() {
   
   const client = await pool.connect();
   try {
-    const res = await client.query('SELECT DISTINCT ticker FROM transactions WHERE ticker IS NOT NULL');
+    const res = await client.query(`
+      SELECT DISTINCT ticker FROM (
+        SELECT ticker FROM stocks
+        UNION
+        SELECT DISTINCT ticker FROM transactions WHERE ticker IS NOT NULL
+      ) combined
+    `);
     const tickers = res.rows.map(r => r.ticker.toUpperCase());
     
     if (tickers.length === 0) return;
@@ -2230,15 +2305,89 @@ async function handleApi(req, res, pathname, query) {
   }
 
   if (pathname === '/api/market/search' && req.method === 'GET') {
-    const q = (query.get('q') || '').trim().toLowerCase();
-    try {
-      const resData = await fetchYahooSearch(q);
-      const quotes = (resData && resData.quotes || [])
-        .slice(0, 12)
-        .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname || x.symbol, quoteType: x.quoteType }));
-      return sendJson(res, 200, { quotes });
-    } catch (e) {
-      return sendJson(res, 502, { error: e.message, quotes: [] });
+    const q = (query.get('q') || '').trim();
+    if (!q) {
+      return sendJson(res, 200, { quotes: [] });
+    }
+    
+    if (isPgActive) {
+      const client = await pool.connect();
+      try {
+        const searchRes = await client.query(`
+          SELECT ticker, name, price, change, currency
+          FROM stocks
+          WHERE LOWER(ticker) LIKE $1 OR LOWER(name) LIKE $1
+          LIMIT 12
+        `, [`%${q.toLowerCase()}%`]);
+        
+        const quotes = searchRes.rows.map(x => ({
+          symbol: x.ticker,
+          name: x.name,
+          quoteType: 'EQUITY'
+        }));
+        
+        client.release();
+        return sendJson(res, 200, { quotes });
+      } catch (e) {
+        client.release();
+        return sendJson(res, 500, { error: e.message, quotes: [] });
+      }
+    } else {
+      const db = readDb();
+      const tickers = new Set();
+      (db.transactions || []).forEach(tx => {
+        if (tx.ticker) tickers.add(tx.ticker.toUpperCase());
+      });
+      for (const t in PRICE_CACHE) {
+        tickers.add(t.toUpperCase());
+      }
+      
+      // Also add from default catalog to make search work offline!
+      const DEFAULT_CATALOG = [
+        { ticker: 'AAPL', name: 'Apple Inc.' },
+        { ticker: 'NVDA', name: 'NVIDIA Corp.' },
+        { ticker: 'TSLA', name: 'Tesla Inc.' },
+        { ticker: 'MSFT', name: 'Microsoft Corp.' },
+        { ticker: 'GOOGL', name: 'Alphabet Inc.' },
+        { ticker: 'AMZN', name: 'Amazon.com Inc.' },
+        { ticker: 'META', name: 'Meta Platforms Inc.' },
+        { ticker: 'NFLX', name: 'Netflix Inc.' },
+        { ticker: 'AMD', name: 'Advanced Micro Devices Inc.' },
+        { ticker: 'INTC', name: 'Intel Corp.' },
+        { ticker: 'TSM', name: 'Taiwan Semiconductor Manufacturing' },
+        { ticker: 'BRK-B', name: 'Berkshire Hathaway Inc.' },
+        { ticker: 'JPM', name: 'JPMorgan Chase & Co.' },
+        { ticker: 'V', name: 'Visa Inc.' },
+        { ticker: 'DIS', name: 'The Walt Disney Co.' },
+        { ticker: 'SBUX', name: 'Starbucks Corp.' },
+        { ticker: 'KO', name: 'The Coca-Cola Co.' },
+        { ticker: 'NKE', name: 'Nike Inc.' },
+        { ticker: 'XOM', name: 'Exxon Mobil Corp.' },
+        { ticker: 'LLY', name: 'Eli Lilly & Co.' }
+      ];
+      DEFAULT_CATALOG.forEach(item => tickers.add(item.ticker.toUpperCase()));
+      
+      const searchTerms = q.toLowerCase();
+      const quotes = [];
+      for (const ticker of tickers) {
+        let name = ticker;
+        const cached = PRICE_CACHE[ticker];
+        if (cached && cached.data && cached.data.name) {
+          name = cached.data.name;
+        } else {
+          const catItem = DEFAULT_CATALOG.find(c => c.ticker === ticker);
+          if (catItem) name = catItem.name;
+        }
+        
+        if (ticker.toLowerCase().includes(searchTerms) || name.toLowerCase().includes(searchTerms)) {
+          quotes.push({
+            symbol: ticker,
+            name,
+            quoteType: 'EQUITY'
+          });
+        }
+      }
+      return sendJson(res, 200, { quotes: quotes.slice(0, 12) });
     }
   }
 
