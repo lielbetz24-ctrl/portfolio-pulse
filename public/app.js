@@ -715,7 +715,9 @@ async function loadUserData() {
 
         if (currentUser.role === 'client') {
             try {
+                console.log(`[API Request] Fetching personal positions summary for client: ${currentUser.id}`);
                 window.positionsSummary = await API.getPositions();
+                console.log(`[API Response] Received personal positions payload:`, window.positionsSummary);
             } catch (posErr) {
                 console.error("Failed to load DB positions summary:", posErr);
             }
@@ -2607,7 +2609,9 @@ async function viewClientPortfolio(clientId) {
     // חישוב מדדי הלקוח מהשרת (כדי להבטיח סנכרון מושלם עם ה-Backend)
     let metrics;
     try {
+        console.log(`[API Request] Fetching positions summary for clientId: ${clientId}`);
         const response = await API.getPositions(clientId);
+        console.log(`[API Response] Received positions payload for clientId: ${clientId}`, response);
         if (response && !response.error) {
             metrics = {
                 cash_balance: response.cash_balance,
@@ -2616,8 +2620,12 @@ async function viewClientPortfolio(clientId) {
                 totalPnLPct: response.total_pnl_pct,
                 totalDailyChangeUSD: response.daily_change_usd,
                 totalDailyChangePct: response.daily_change_pct,
-                holdingsList: response.holdings || []
+                holdingsList: response.holdings || [],
+                transactions: response.transactions || transactions.filter(t => t.portfolio_id === portfolio.id)
             };
+            console.log(`[Metrics Mapping] Successfully mapped metrics for clientId: ${clientId}. Holdings count: ${metrics.holdingsList.length}`);
+        } else {
+            console.warn(`[API Warning] Response returned with error or empty payload for clientId: ${clientId}`, response);
         }
     } catch (e) {
         console.error("Failed to load client positions summary from server:", e);
