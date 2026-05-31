@@ -23,6 +23,12 @@ pool.on('error', (err) => {
   console.error('[Database Pool Error] Momentary connection loss or PostgreSQL error:', err.message);
 });
 
+// Event listener triggered whenever a database connection is acquired from the pool
+pool.on('acquire', (client) => {
+  console.log('[Database] Client acquired from pool.');
+  console.log(`[Database] Real-time Pool Status -> Active Connections: ${pool.totalCount - pool.idleCount} | Idle: ${pool.idleCount} | Total: ${pool.totalCount} | Waiting: ${pool.waitingCount}`);
+});
+
 let isPgActive = false;
 
 async function initDbWithRetry(retries = 5, delayMs = 5000) {
@@ -41,6 +47,7 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
       
       console.log('[Database] PostgreSQL connection successful! Running in PostgreSQL mode.');
       isPgActive = true;
+      console.log(`[Database] Pool initialized with max connections: ${pool.options.max || 10}`);
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
