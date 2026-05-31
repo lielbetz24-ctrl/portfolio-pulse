@@ -2661,7 +2661,9 @@ async function handleApi(req, res, pathname, query) {
       const apiStart = Date.now();
       res.on('finish', () => {
         const duration = Date.now() - apiStart;
-        if (duration > 500) {
+        if (duration > 1000) {
+          console.warn(`[Performance Alert] High Latency on ${req.url}: ${duration}ms`);
+        } else if (duration > 500) {
           console.warn(`[Performance Warning] Slow Request: ${req.url} took ${duration}ms`);
         }
       });
