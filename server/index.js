@@ -2379,16 +2379,77 @@ async function handleApi(req, res, pathname, query) {
           LIMIT 12
         `, [`%${q.toLowerCase()}%`]);
         
-        const quotes = searchRes.rows.map(x => ({
-          symbol: x.ticker,
+        const localQuotes = searchRes.rows.map(x => ({
+          symbol: x.ticker.toUpperCase(),
           name: x.name,
           quoteType: 'EQUITY'
         }));
         
         client.release();
-        return sendJson(res, 200, { quotes });
+        
+        // Parallel Fetch from Yahoo Finance Search Suggestions API
+        let yahooQuotes = [];
+        try {
+          const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}`;
+          const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PortfolioPulse/1.0)' } });
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.quotes) {
+              yahooQuotes = data.quotes
+                .filter(x => x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
+                .map(x => ({
+                  symbol: x.symbol.toUpperCase(),
+                  name: x.longname || x.shortname || x.symbol,
+                  quoteType: x.quoteType
+                }));
+            }
+          }
+        } catch (yahooErr) {
+          console.error('[Search API Warning] Yahoo Finance search suggestions failed:', yahooErr.message);
+        }
+        
+        // Merge results and identify brand-new tickers for lazy loading
+        const seen = new Set();
+        const quotes = [];
+        const newYahooQuotes = [];
+        
+        localQuotes.forEach(quote => {
+          seen.add(quote.symbol);
+          quotes.push(quote);
+        });
+        
+        yahooQuotes.forEach(quote => {
+          if (!seen.has(quote.symbol)) {
+            seen.add(quote.symbol);
+            quotes.push(quote);
+            newYahooQuotes.push(quote);
+          }
+        });
+        
+        // Perform Lazy Loading in background
+        if (newYahooQuotes.length > 0) {
+          (async () => {
+            const lazyClient = await pool.connect();
+            try {
+              for (const quote of newYahooQuotes) {
+                await lazyClient.query(`
+                  INSERT INTO stocks (ticker, name, price, change, currency, previous_close)
+                  VALUES ($1, $2, 0, 0, 'USD', 0)
+                  ON CONFLICT (ticker) DO NOTHING
+                `, [quote.symbol, quote.name]);
+              }
+              console.log(`[Lazy Loading] Cached ${newYahooQuotes.length} new symbols in PostgreSQL stocks table.`);
+            } catch (lazyErr) {
+              console.error('[Lazy Loading Error] Failed to cache search suggestions in DB:', lazyErr.message);
+            } finally {
+              lazyClient.release();
+            }
+          })().catch(err => console.error('[Lazy Loading Async Error] Unhandled background error:', err));
+        }
+        
+        return sendJson(res, 200, { quotes: quotes.slice(0, 12) });
       } catch (e) {
-        client.release();
+        if (client) client.release();
         return sendJson(res, 500, { error: e.message, quotes: [] });
       }
     } else {
