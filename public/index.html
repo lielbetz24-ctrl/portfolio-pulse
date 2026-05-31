@@ -250,9 +250,16 @@
 
                     <div class="dashboard-visuals">
                         <div class="visual-card holdings-card">
-                            <div class="card-header">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; gap: 15px;">
                                 <h3>מניות מוחזקות בתיק</h3>
-                                <span class="badge badge-outline" id="holdings-count">0 נכסים</span>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <select id="holdings-sort-select" style="background: rgba(255,255,255,0.06); color: var(--text-primary); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 5px 12px; font-size: 0.8rem; outline: none; cursor: pointer; transition: all 0.3s; font-family: inherit;" onchange="handleHoldingsSortChange()">
+                                        <option value="market_value">אחזקה גדולה ביותר</option>
+                                        <option value="daily_change">שינוי יומי (גבוה לנמוך)</option>
+                                        <option value="total_return">שינוי ממועד קנייה (גבוה לנמוך)</option>
+                                    </select>
+                                    <span class="badge badge-outline" id="holdings-count">0 נכסים</span>
+                                </div>
                             </div>
                             <div class="table-container">
                                 <table class="holdings-table">

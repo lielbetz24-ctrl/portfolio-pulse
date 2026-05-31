@@ -1040,9 +1040,42 @@ function toggleHoldingDetails(idx, prefix) {
     }
 }
 
+let holdingsSortOption = localStorage.getItem('holdings_sort_option') || 'market_value';
+
+function sortHoldingsList(holdingsList) {
+    return [...holdingsList].sort((a, b) => {
+        if (holdingsSortOption === 'daily_change') {
+            const changeA = a.daily_change ?? (MOCK_STOCK_PRICES[a.ticker]?.change) ?? 0;
+            const changeB = b.daily_change ?? (MOCK_STOCK_PRICES[b.ticker]?.change) ?? 0;
+            return changeB - changeA;
+        } else if (holdingsSortOption === 'total_return') {
+            const pnlA = a.pnl_pct ?? a.change_since_purchase_pct ?? 0;
+            const pnlB = b.pnl_pct ?? b.change_since_purchase_pct ?? 0;
+            return pnlB - pnlA;
+        } else {
+            return (b.market_value || 0) - (a.market_value || 0);
+        }
+    });
+}
+
+function handleHoldingsSortChange() {
+    const sortSelect = document.getElementById('holdings-sort-select');
+    if (sortSelect) {
+        holdingsSortOption = sortSelect.value;
+        localStorage.setItem('holdings_sort_option', holdingsSortOption);
+        refreshCalculations();
+    }
+}
+
 function renderHoldingsTable(holdingsList) {
     const tableBody = document.getElementById('holdings-table-body');
     const countBadge = document.getElementById('holdings-count');
+
+    // Sync select input element value with state
+    const sortSelect = document.getElementById('holdings-sort-select');
+    if (sortSelect && sortSelect.value !== holdingsSortOption) {
+        sortSelect.value = holdingsSortOption;
+    }
 
     countBadge.textContent = `${holdingsList.length} נכסים`;
     tableBody.innerHTML = '';
@@ -1058,7 +1091,9 @@ function renderHoldingsTable(holdingsList) {
         return;
     }
 
-    holdingsList.forEach((holding, idx) => {
+    const sortedList = sortHoldingsList(holdingsList);
+
+    sortedList.forEach((holding, idx) => {
         tableBody.appendChild(buildHoldingMainRow(holding, idx, 'client'));
         tableBody.appendChild(buildHoldingDetailsRow(holding, idx, 'client'));
     });
@@ -1071,7 +1106,8 @@ function renderHoldingsTableInto(tbodyElement, holdingsList, emptyMessage, prefi
         tbodyElement.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">${emptyMessage}</td></tr>`;
         return;
     }
-    holdingsList.forEach((holding, idx) => {
+    const sortedList = sortHoldingsList(holdingsList);
+    sortedList.forEach((holding, idx) => {
         tbodyElement.appendChild(buildHoldingMainRow(holding, idx, prefix));
         tbodyElement.appendChild(buildHoldingDetailsRow(holding, idx, prefix));
     });
