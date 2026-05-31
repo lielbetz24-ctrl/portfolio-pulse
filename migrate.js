@@ -101,7 +101,9 @@ async function run() {
         target_user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
         image_url VARCHAR(255),
         date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        is_read BOOLEAN DEFAULT FALSE
+        is_read BOOLEAN DEFAULT FALSE,
+        advisor_id VARCHAR(50),
+        author_name VARCHAR(100)
       );
 
       CREATE TABLE IF NOT EXISTS notifications (
@@ -154,6 +156,10 @@ async function run() {
       );
     `);
     
+    // Ensure existing tips tables are migrated
+    await client.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS advisor_id VARCHAR(50)`);
+    await client.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS author_name VARCHAR(100)`);
+
     console.log('[Migration] Database schema tables initialized!');
 
     // 1. Migrate Users

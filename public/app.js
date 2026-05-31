@@ -235,14 +235,15 @@ function initWebSocket() {
                     if (!isDrawerOpen) {
                         const chatBadge = document.getElementById('personal-chat-badge');
                         if (chatBadge) {
-                            const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender === 'avi');
+                            const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender !== 'client' && t.recommender !== 'ai');
                             const unreadTips = personalTips.filter(t => !t.is_read);
                             chatBadge.textContent = unreadTips.length.toString();
                             chatBadge.style.display = unreadTips.length > 0 ? 'flex' : 'none';
                         }
                         
                         // Show visual toast if drawer is closed
-                        showToast(`הודעה חדשה מאבי: ${tip.content}`, 'success');
+                        const authorName = tip.recommender && tip.recommender !== 'avi' && tip.recommender !== 'client' && tip.recommender !== 'ai' ? tip.recommender : 'אבי';
+                        showToast(`הודעה חדשה מ-${authorName}: ${tip.content}`, 'success');
                     }
                 }
             } else if (msg.type === 'new_message_to_advisor') {
@@ -266,7 +267,7 @@ function initWebSocket() {
             } else if (msg.type === 'messages_read') {
                 if (currentUser.role === 'admin' && activeViewingClientId === msg.userId) {
                     allTips.forEach(t => {
-                        if (t.target_user_id === msg.userId && t.recommender === 'avi') {
+                        if (t.target_user_id === msg.userId && t.recommender !== 'client' && t.recommender !== 'ai') {
                             t.is_read = true;
                         }
                     });
@@ -2078,8 +2079,8 @@ function renderAITips() {
     const metrics = calculatePortfolioMetrics(activePortfolio.id);
     const holdingTickers = [...PortfolioEngine.getPortfolioTickerSet(metrics.holdingsMap)];
     
-    // Filter to only include Avi's recommendations
-    const aviTips = allTips.filter(t => t.recommender === 'avi');
+    // Filter to only include advisor's recommendations
+    const aviTips = allTips.filter(t => t.recommender !== 'ai' && t.recommender !== 'client');
     const filteredTips = PortfolioEngine.filterTipsForPortfolio(aviTips, holdingTickers);
 
     if (filteredTips.length === 0) {
@@ -2092,7 +2093,8 @@ function renderAITips() {
         div.className = 'tip-item';
 
         const isGeneral = tip.ticker === null;
-        const titleText = isGeneral ? 'אבי' : `אבי — המלצה ל-${tip.ticker}`;
+        const author = tip.recommender && tip.recommender !== 'avi' && tip.recommender !== 'ai' && tip.recommender !== 'client' ? tip.recommender : 'אבי';
+        const titleText = isGeneral ? author : `${author} — המלצה ל-${tip.ticker}`;
         
         let imageHtml = '';
         if (tip.image_url) {
@@ -2835,8 +2837,8 @@ function renderAdminTipsList() {
     const listContainer = document.getElementById('admin-tips-list');
     const countBadge = document.getElementById('admin-tips-count');
 
-    // Filter out AI recommendations
-    const aviTips = allTips.filter(tip => tip.recommender !== 'ai');
+    // Filter out AI and Client recommendations
+    const aviTips = allTips.filter(tip => tip.recommender !== 'ai' && tip.recommender !== 'client');
 
     countBadge.textContent = `${aviTips.length} פעילים`;
     listContainer.innerHTML = '';
@@ -2858,7 +2860,7 @@ function renderAdminTipsList() {
         const tagClass = isGeneral ? 'general' : 'stock';
 
         const recommender = tip.recommender || 'avi';
-        const recommenderText = recommender === 'ai' ? 'בוט AI' : 'אבי';
+        const recommenderText = recommender === 'ai' ? 'בוט AI' : (recommender === 'client' ? 'הלקוח' : (recommender === 'avi' ? 'אבי' : recommender));
         const recommenderClass = recommender === 'ai' ? 'recommender-ai' : 'recommender-avi';
         const recommenderIcon = recommender === 'ai' ? 'psychology' : 'person';
 
@@ -3414,11 +3416,11 @@ function renderPersonalTips() {
     
     const chatBadge = document.getElementById('personal-chat-badge');
     
-    // Personal conversation thread = all tips from Avi to this user + all replies from this user to Avi
-    const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
+    // Personal conversation thread = all tips from advisors to this user + all replies from this user
+    const personalTips = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender !== 'ai');
     
-    // Show/Hide Floating Widget (Bubble appears only if Avi has initiated a personal recommendation/tip)
-    const aviInitiatedTips = personalTips.filter(t => t.recommender === 'avi');
+    // Show/Hide Floating Widget (Bubble appears only if an advisor has initiated a personal recommendation/tip)
+    const aviInitiatedTips = personalTips.filter(t => t.recommender !== 'client');
     const unreadAviTips = aviInitiatedTips.filter(t => !t.is_read);
     
     if (chatWidget) {
@@ -3632,7 +3634,7 @@ function openPersonalChatDrawer() {
         
         // Mark locally as read to avoid wait delay
         allTips.forEach(t => {
-            if (t.target_user_id === currentUser.id && t.recommender === 'avi') {
+            if (t.target_user_id === currentUser.id && t.recommender !== 'client' && t.recommender !== 'ai') {
                 t.is_read = true;
             }
         });
@@ -3654,8 +3656,8 @@ function renderPersonalChatMessages() {
     
     container.innerHTML = '';
     
-    // Personal conversation thread = Avi tips to Liel + Liel replies
-    const thread = allTips.filter(t => t.target_user_id === currentUser.id && (t.recommender === 'avi' || t.recommender === 'client'));
+    // Personal conversation thread = Advisor tips + Client replies
+    const thread = allTips.filter(t => t.target_user_id === currentUser.id && t.recommender !== 'ai');
     
     // Sort chronologically
     thread.sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
@@ -3719,19 +3721,42 @@ function renderPersonalChatMessages() {
                 ${timeSpan}
             `;
             
-            const img = document.createElement('img');
-            img.src = 'avi_profile.jpg';
-            img.style.width = '32px';
-            img.style.height = '32px';
-            img.style.borderRadius = '50%';
-            img.style.objectFit = 'cover';
-            img.style.border = '1px solid #a334ff';
-            img.style.marginLeft = '8px';
-            img.style.flexShrink = '0';
-            img.style.alignSelf = 'flex-end';
-            
             wrapper.appendChild(div);
-            wrapper.appendChild(img);
+            
+            if (msg.recommender === 'avi') {
+                const img = document.createElement('img');
+                img.src = 'avi_profile.jpg';
+                img.style.width = '32px';
+                img.style.height = '32px';
+                img.style.borderRadius = '50%';
+                img.style.objectFit = 'cover';
+                img.style.border = '1px solid #a334ff';
+                img.style.marginLeft = '8px';
+                img.style.flexShrink = '0';
+                img.style.alignSelf = 'flex-end';
+                wrapper.appendChild(img);
+            } else {
+                const avatarEl = document.createElement('div');
+                const recommenderName = msg.recommender || 'ש';
+                const initial = recommenderName.trim().charAt(0);
+                avatarEl.textContent = initial;
+                avatarEl.style.width = '32px';
+                avatarEl.style.height = '32px';
+                avatarEl.style.borderRadius = '50%';
+                avatarEl.style.background = 'var(--accent-purple-start, #a334ff)';
+                avatarEl.style.border = '1px solid #a334ff';
+                avatarEl.style.marginLeft = '8px';
+                avatarEl.style.flexShrink = '0';
+                avatarEl.style.alignSelf = 'flex-end';
+                avatarEl.style.display = 'flex';
+                avatarEl.style.alignItems = 'center';
+                avatarEl.style.justifyContent = 'center';
+                avatarEl.style.color = '#fff';
+                avatarEl.style.fontSize = '0.85rem';
+                avatarEl.style.fontWeight = 'bold';
+                avatarEl.style.fontFamily = 'Outfit, sans-serif';
+                wrapper.appendChild(avatarEl);
+            }
         }
         
         container.appendChild(wrapper);
@@ -3835,7 +3860,7 @@ function registerAdminChatWSListener() {
             } else if (msg.type === 'messages_read') {
                 if (activeViewingClientId === msg.userId) {
                     allTips.forEach(t => {
-                        if (t.target_user_id === msg.userId && t.recommender === 'avi') {
+                        if (t.target_user_id === msg.userId && t.recommender !== 'client' && t.recommender !== 'ai') {
                             t.is_read = true;
                         }
                     });
@@ -3858,7 +3883,7 @@ function renderAdminClientChatHistory() {
     container.innerHTML = '';
     
     // Conversation thread for this specific viewed client
-    const thread = allTips.filter(t => t.target_user_id === activeViewingClientId && (t.recommender === 'avi' || t.recommender === 'client'));
+    const thread = allTips.filter(t => t.target_user_id === activeViewingClientId && t.recommender !== 'ai');
     
     // Sort chronologically
     thread.sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
@@ -3936,19 +3961,42 @@ function renderAdminClientChatHistory() {
                 ${timeSpan}
             `;
             
-            const img = document.createElement('img');
-            img.src = 'avi_profile.jpg';
-            img.style.width = '32px';
-            img.style.height = '32px';
-            img.style.borderRadius = '50%';
-            img.style.objectFit = 'cover';
-            img.style.border = '1px solid #a334ff';
-            img.style.marginLeft = '8px';
-            img.style.flexShrink = '0';
-            img.style.alignSelf = 'flex-end';
-            
             wrapper.appendChild(div);
-            wrapper.appendChild(img);
+            
+            if (msg.recommender === 'avi') {
+                const img = document.createElement('img');
+                img.src = 'avi_profile.jpg';
+                img.style.width = '32px';
+                img.style.height = '32px';
+                img.style.borderRadius = '50%';
+                img.style.objectFit = 'cover';
+                img.style.border = '1px solid #a334ff';
+                img.style.marginLeft = '8px';
+                img.style.flexShrink = '0';
+                img.style.alignSelf = 'flex-end';
+                wrapper.appendChild(img);
+            } else {
+                const avatarEl = document.createElement('div');
+                const recommenderName = msg.recommender || 'ש';
+                const initial = recommenderName.trim().charAt(0);
+                avatarEl.textContent = initial;
+                avatarEl.style.width = '32px';
+                avatarEl.style.height = '32px';
+                avatarEl.style.borderRadius = '50%';
+                avatarEl.style.background = 'var(--accent-purple-start, #a334ff)';
+                avatarEl.style.border = '1px solid #a334ff';
+                avatarEl.style.marginLeft = '8px';
+                avatarEl.style.flexShrink = '0';
+                avatarEl.style.alignSelf = 'flex-end';
+                avatarEl.style.display = 'flex';
+                avatarEl.style.alignItems = 'center';
+                avatarEl.style.justifyContent = 'center';
+                avatarEl.style.color = '#fff';
+                avatarEl.style.fontSize = '0.85rem';
+                avatarEl.style.fontWeight = 'bold';
+                avatarEl.style.fontFamily = 'Outfit, sans-serif';
+                wrapper.appendChild(avatarEl);
+            }
         }
         
         container.appendChild(wrapper);

@@ -204,7 +204,9 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
           target_user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
           image_url VARCHAR(255),
           date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          is_read BOOLEAN DEFAULT FALSE
+          is_read BOOLEAN DEFAULT FALSE,
+          advisor_id VARCHAR(50),
+          author_name VARCHAR(100)
         );
 
         CREATE TABLE IF NOT EXISTS notifications (
@@ -256,6 +258,11 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
           PRIMARY KEY (portfolio_id, ticker)
         );
       `);
+
+      // Ensure tips table columns for advisor separation are present
+      await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS advisor_id VARCHAR(50)`);
+      await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS author_name VARCHAR(100)`);
+
       console.log('[Database] Database tables initialized successfully!');
 
       // Re-index stocks table on startup as requested
@@ -1725,6 +1732,8 @@ async function handleApi(req, res, pathname, query) {
           ticker: t.ticker,
           content: t.content,
           recommender: t.recommender,
+          advisor_id: t.advisor_id,
+          author_name: t.author_name,
           target_user_id: t.target_user_id,
           is_read: t.is_read || false,
           image_url: t.image_url,
@@ -2121,6 +2130,8 @@ async function handleApi(req, res, pathname, query) {
           ticker: t.ticker,
           content: t.content,
           recommender: t.recommender,
+          advisor_id: t.advisor_id,
+          author_name: t.author_name,
           target_user_id: t.target_user_id,
           is_read: t.is_read || false,
           image_url: t.image_url,
@@ -2166,6 +2177,8 @@ async function handleApi(req, res, pathname, query) {
       return sendJson(res, 403, { error: 'אין הרשאה לשלוח הודעה למשתמש אחר' });
     }
     
+    const recommenderName = isClientMessage ? 'client' : (user.name || 'avi');
+    const advisorId = user.id;
     const targetUserId = body.target_user_id || null;
     const dateStr = new Date().toISOString();
     
@@ -2178,7 +2191,7 @@ async function handleApi(req, res, pathname, query) {
       notifBody = body.content.trim();
       targetUser = 'u_admin_avi';
     } else if (targetUserId) {
-      notifTitle = 'הודעה אישית מאבי';
+      notifTitle = `הודעה אישית מ-${recommenderName}`;
       notifBody = 'התקבלה המלצה חדשה המותאמת אישית לתיק ההשקעות שלך. לחץ לצפייה.';
     } else {
       notifTitle = 'עדכון חדש בקהילה';
@@ -2189,24 +2202,28 @@ async function handleApi(req, res, pathname, query) {
       try {
         const tipId = uid('tip');
         await pool.query(`
-          INSERT INTO tips (id, ticker, content, recommender, target_user_id, image_url, date, is_read)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          INSERT INTO tips (id, ticker, content, recommender, target_user_id, image_url, date, is_read, advisor_id, author_name)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `, [
           tipId,
           body.ticker ? body.ticker.toUpperCase() : null,
           body.content.trim(),
-          body.recommender || 'avi',
+          recommenderName,
           targetUserId,
           body.image_url || null,
           dateStr,
-          false
+          false,
+          advisorId,
+          recommenderName
         ]);
         
         const newTip = {
           id: tipId,
           ticker: body.ticker || null,
           content: body.content.trim(),
-          recommender: body.recommender || 'avi',
+          recommender: recommenderName,
+          advisor_id: advisorId,
+          author_name: recommenderName,
           target_user_id: targetUserId,
           image_url: body.image_url || null,
           date: dateStr.split('T')[0]
@@ -2260,8 +2277,9 @@ async function handleApi(req, res, pathname, query) {
       const db = readDb();
       const tip = {
         id: uid('t'),
-        advisor_id: user.role === 'admin' ? user.id : 'u_admin_avi',
-        recommender: body.recommender || 'avi',
+        advisor_id: advisorId,
+        recommender: recommenderName,
+        author_name: recommenderName,
         ticker: body.ticker ? body.ticker.toUpperCase() : null,
         content: body.content.trim(),
         target_user_id: targetUserId,
