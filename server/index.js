@@ -1836,7 +1836,9 @@ async function handleApi(req, res, pathname, query) {
             pnl_pct: metrics.pnl_pct,
             daily_change: r.daily_change !== null ? Number(r.daily_change) : null,
             daily_change_usd: metrics.daily_change_usd,
-            prev_stock_value: metrics.prev_stock_value
+            prev_stock_value: metrics.prev_stock_value,
+            total_return_usd: metrics.total_return_usd,
+            daily_return_usd: metrics.daily_return_usd
           };
         });
 
@@ -1931,7 +1933,9 @@ async function handleApi(req, res, pathname, query) {
           pnl_pct: metrics.pnl_pct,
           daily_change,
           daily_change_usd: metrics.daily_change_usd,
-          prev_stock_value: metrics.prev_stock_value
+          prev_stock_value: metrics.prev_stock_value,
+          total_return_usd: metrics.total_return_usd,
+          daily_return_usd: metrics.daily_return_usd
         });
       }
 

@@ -48,7 +48,9 @@ function calculateHoldingMetrics(quantity, avg_buy_price, current_price, daily_c
       pnl: null,
       pnl_pct: null,
       daily_change_usd: 0,
-      prev_stock_value: 0
+      prev_stock_value: 0,
+      total_return_usd: 0,
+      daily_return_usd: 0
     };
   }
 
@@ -71,12 +73,17 @@ function calculateHoldingMetrics(quantity, avg_buy_price, current_price, daily_c
     prev_stock_value = qty * currentPrice;
   }
 
+  const total_return_usd = pnl;
+  const daily_return_usd = daily_change_usd;
+
   return {
     market_value,
     pnl,
     pnl_pct,
     daily_change_usd,
-    prev_stock_value
+    prev_stock_value,
+    total_return_usd,
+    daily_return_usd
   };
 }
 

@@ -1018,11 +1018,16 @@ function buildHoldingMainRow(holding, idx, prefix) {
     const portfolioValueCell = holding.current_price != null ? formatCurrency(holding.quantity * holding.current_price) : '—';
 
     let dailyChangeHtml;
-    if (stockInfo.change != null && !isNaN(stockInfo.change)) {
-        const dailyChange = stockInfo.change;
+    const dailyChange = holding.daily_change ?? stockInfo.change;
+    const dailyReturn = holding.daily_return_usd ?? holding.daily_change_usd ?? 0;
+    if (dailyChange != null && !isNaN(dailyChange)) {
         const changeClass = dailyChange >= 0 ? 'pnl-positive' : 'pnl-negative';
         const changePrefix = dailyChange >= 0 ? '+' : '';
-        dailyChangeHtml = `<span class="${changeClass}">${changePrefix}${dailyChange.toFixed(2)}%</span>`;
+        const formattedUSD = (dailyReturn >= 0 ? '+' : '-') + '$' + Math.abs(dailyReturn).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        dailyChangeHtml = `
+            <span class="${changeClass}" style="font-weight: 600; display: block;">${changePrefix}${dailyChange.toFixed(2)}%</span>
+            <span class="${changeClass}" style="font-size: 0.78rem; font-family: var(--font-numbers); font-weight: 500; display: block; margin-top: 2px;">${formattedUSD}</span>
+        `;
     } else {
         dailyChangeHtml = '<span class="text-muted">—</span>';
     }
@@ -1037,10 +1042,10 @@ function buildHoldingMainRow(holding, idx, prefix) {
                 </div>
             </div>
         </td>
-        <td style="font-family: var(--font-numbers); font-weight: 600;">${marketPriceCell}</td>
-        <td>${dailyChangeHtml}</td>
-        <td style="font-family: var(--font-numbers); font-weight: 700; color: var(--text-primary);">${portfolioValueCell}</td>
-        <td style="text-align: center; color: var(--accent-blue-start);">
+        <td style="font-family: var(--font-numbers); font-weight: 600; vertical-align: middle;">${marketPriceCell}</td>
+        <td style="vertical-align: middle;">${dailyChangeHtml}</td>
+        <td style="font-family: var(--font-numbers); font-weight: 700; color: var(--text-primary); vertical-align: middle;">${portfolioValueCell}</td>
+        <td style="text-align: center; color: var(--accent-blue-start); vertical-align: middle;">
             <span class="material-icons-round" id="${prefix}-exp-icon-${idx}" style="transition: transform 0.3s; font-size: 18px;">expand_more</span>
         </td>
     `;
@@ -1058,11 +1063,16 @@ function buildHoldingDetailsRow(holding, idx, prefix) {
     const quantityCell = holding.quantity.toFixed(4);
 
     let changeSincePurchaseHtml;
-    if (holding.change_since_purchase_pct != null && !isNaN(holding.change_since_purchase_pct)) {
-        const pct = holding.change_since_purchase_pct;
+    const pct = holding.pnl_pct ?? holding.change_since_purchase_pct;
+    const totalReturn = holding.total_return_usd ?? holding.pnl ?? 0;
+    if (pct != null && !isNaN(pct)) {
         const cls = pct >= 0 ? 'pnl-positive' : 'pnl-negative';
         const prefixSign = pct >= 0 ? '+' : '';
-        changeSincePurchaseHtml = `<span class="${cls}">${prefixSign}${pct.toFixed(2)}%</span>`;
+        const formattedUSD = (totalReturn >= 0 ? '+' : '-') + '$' + Math.abs(totalReturn).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        changeSincePurchaseHtml = `
+            <span class="${cls}" style="font-weight: 600; display: block;">${prefixSign}${pct.toFixed(2)}%</span>
+            <span class="${cls}" style="font-size: 0.78rem; font-family: var(--font-numbers); font-weight: 500; display: block; margin-top: 2px;">${formattedUSD}</span>
+        `;
     } else {
         changeSincePurchaseHtml = '<span class="text-muted">—</span>';
     }
