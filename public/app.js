@@ -3032,10 +3032,22 @@ async function handleDeleteTip(tipId) {
         await API.deleteTip(tipId);
         allTips = allTips.filter(t => t.id !== tipId);
         renderAdminTipsList();
-        document.getElementById('admin-val-tips').textContent = allTips.length;
+        if (document.getElementById('admin-val-tips')) {
+            document.getElementById('admin-val-tips').textContent = allTips.length;
+        }
         showToast('ההמלצה נמחקה ממסד הנתונים בהצלחה.', 'success');
     } catch (e) {
-        showToast(e.message || 'שגיאה במחיקה', 'error');
+        if (e.message && (e.message.includes('לא נמצאה') || e.message.includes('404') || e.message.includes('not found') || e.message.includes('Not Found'))) {
+            // Self-healing: if the item was already deleted on the server, remove it from UI anyway
+            allTips = allTips.filter(t => t.id !== tipId);
+            renderAdminTipsList();
+            if (document.getElementById('admin-val-tips')) {
+                document.getElementById('admin-val-tips').textContent = allTips.length;
+            }
+            showToast('ההמלצה כבר נמחקה מהשרת. הרשימה עודכנה.', 'warning');
+        } else {
+            showToast(e.message || 'שגיאה במחיקה', 'error');
+        }
     }
 }
 

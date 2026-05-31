@@ -2299,7 +2299,7 @@ async function handleApi(req, res, pathname, query) {
     }
   }
 
-  if (pathname.startsWith('/api/tips/') && req.method === 'DELETE') {
+  if ((pathname.startsWith('/api/tips/') || pathname.startsWith('/api/recommendations/')) && req.method === 'DELETE') {
     if (!user || user.role !== 'admin') return sendJson(res, 403, { error: 'גישה למנהלים בלבד' });
     const parts = pathname.split('/');
     const tipId = parts[parts.length - 1];
