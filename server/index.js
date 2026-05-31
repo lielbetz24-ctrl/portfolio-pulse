@@ -17,156 +17,196 @@ const pool = new Pool({
 
 let isPgActive = false;
 
-async function initDb() {
-  try {
-    console.log('[Database] Connecting to PostgreSQL...');
-    const client = await pool.connect();
-    await client.query('SELECT NOW()');
-    client.release();
-    
-    console.log('[Database] PostgreSQL connection successful! Running in PostgreSQL mode.');
-    isPgActive = true;
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(50) PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        email VARCHAR(100) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client')),
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS portfolios (
-        id VARCHAR(50) PRIMARY KEY,
-        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
-        name VARCHAR(100) NOT NULL,
-        cash_balance DECIMAL(15, 4) DEFAULT 0,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS transactions (
-        id VARCHAR(50) PRIMARY KEY,
-        portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
-        ticker VARCHAR(20),
-        action_type VARCHAR(20) NOT NULL CHECK (action_type IN ('buy', 'sell', 'deposit', 'withdraw', 'holding')),
-        quantity DECIMAL(15, 6) DEFAULT 0,
-        price DECIMAL(15, 4) DEFAULT 0,
-        transaction_date TIMESTAMP WITH TIME ZONE NOT NULL,
-        created_by_user_id VARCHAR(50) REFERENCES users(id),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS tips (
-        id VARCHAR(50) PRIMARY KEY,
-        ticker VARCHAR(20),
-        content TEXT NOT NULL,
-        recommender VARCHAR(20) NOT NULL,
-        target_user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
-        image_url VARCHAR(255),
-        date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        is_read BOOLEAN DEFAULT FALSE
-      );
-
-      CREATE TABLE IF NOT EXISTS notifications (
-        id VARCHAR(50) PRIMARY KEY,
-        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
-        title VARCHAR(255) NOT NULL,
-        body TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS notification_reads (
-        id SERIAL PRIMARY KEY,
-        notification_id VARCHAR(50) REFERENCES notifications(id) ON DELETE CASCADE,
-        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
-        UNIQUE(notification_id, user_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS subscriptions (
-        id VARCHAR(50) PRIMARY KEY,
-        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
-        fcm_token TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS stocks (
-        ticker VARCHAR(20) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        price DECIMAL(15, 4) NOT NULL DEFAULT 0,
-        change DECIMAL(15, 4) NOT NULL DEFAULT 0,
-        currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-        previous_close DECIMAL(15, 4) NOT NULL DEFAULT 0,
-        last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
-      CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
-
-      CREATE TABLE IF NOT EXISTS positions (
-        portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
-        ticker VARCHAR(20) NOT NULL,
-        quantity DECIMAL(15, 6) NOT NULL DEFAULT 0,
-        avg_buy_price DECIMAL(15, 4) NOT NULL DEFAULT 0,
-        current_price DECIMAL(15, 4) DEFAULT NULL,
-        market_value DECIMAL(15, 4) DEFAULT NULL,
-        pnl DECIMAL(15, 4) DEFAULT NULL,
-        pnl_pct DECIMAL(15, 4) DEFAULT NULL,
-        PRIMARY KEY (portfolio_id, ticker)
-      );
-    `);
-    console.log('[Database] Database tables initialized successfully!');
-
-    // Re-index stocks table on startup as requested
-    try {
-      await pool.query('REINDEX TABLE stocks');
-      console.log('[Database] Table "stocks" re-indexed successfully.');
-    } catch (reindexErr) {
-      console.error('[Database Warning] Failed to re-index stocks table:', reindexErr.message);
-    }
-    
-    // Auto-migrate local JSON database into PostgreSQL if present on boot
-    await migrateJsonToPostgres(pool);
-    
-    // Seed admin if not present
-    const res = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
-    if (res.rows.length === 0) {
-      console.log('[Database] Seeding default admin user...');
-      const adminId = 'u_admin_avi';
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.scryptSync('AVIm76543', salt, 64).toString('hex');
-      const passwordHash = `${salt}:${hash}`;
-      await pool.query(
-        'INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)',
-        [adminId, 'אבי', 'aviariel91@gmail.com', passwordHash, 'admin']
-      );
-      console.log('[Database] Seeding completed.');
-    }
-
-    // Sync all existing portfolios to positions table on boot
-    const startupClient = await pool.connect();
-    try {
-      const portRes = await startupClient.query('SELECT id FROM portfolios');
-      console.log(`[Database] Syncing positions for ${portRes.rows.length} portfolios on startup...`);
-      for (const port of portRes.rows) {
-        await syncPortfolioPositions(port.id, startupClient);
-      }
-      console.log('[Database] Initial startup positions sync completed.');
-    } catch (syncErr) {
-      console.error('[Database Error] Failed startup positions sync:', syncErr.message);
-    } finally {
-      startupClient.release();
-    }
-
-    // Run stock price updater once on startup in background
-    updateAllStockPricesJob().catch(err => {
-      console.error('[Job Error] Failed to run initial stock price update:', err.message);
-    });
-
-  } catch (err) {
-    console.warn('[Database Warning] PostgreSQL connection failed. Falling back to JSON database mode (data/db.json). Reason:', err.message);
+async function initDbWithRetry(retries = 5, delayMs = 5000) {
+  if (!process.env.DATABASE_URL) {
+    console.warn('[Database Warning] DATABASE_URL environment variable is missing. Skipping PostgreSQL connection attempts to localhost and falling back directly to local JSON database.');
     isPgActive = false;
+    return;
+  }
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Database] Connecting to PostgreSQL (Attempt ${attempt}/${retries})...`);
+      const client = await pool.connect();
+      await client.query('SELECT NOW()');
+      client.release();
+      
+      console.log('[Database] PostgreSQL connection successful! Running in PostgreSQL mode.');
+      isPgActive = true;
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(50) PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          email VARCHAR(100) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'client')),
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS portfolios (
+          id VARCHAR(50) PRIMARY KEY,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          name VARCHAR(100) NOT NULL,
+          cash_balance DECIMAL(15, 4) DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS transactions (
+          id VARCHAR(50) PRIMARY KEY,
+          portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
+          ticker VARCHAR(20),
+          action_type VARCHAR(20) NOT NULL CHECK (action_type IN ('buy', 'sell', 'deposit', 'withdraw', 'holding')),
+          quantity DECIMAL(15, 6) DEFAULT 0,
+          price DECIMAL(15, 4) DEFAULT 0,
+          transaction_date TIMESTAMP WITH TIME ZONE NOT NULL,
+          created_by_user_id VARCHAR(50) REFERENCES users(id),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS tips (
+          id VARCHAR(50) PRIMARY KEY,
+          ticker VARCHAR(20),
+          content TEXT NOT NULL,
+          recommender VARCHAR(20) NOT NULL,
+          target_user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          image_url VARCHAR(255),
+          date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          is_read BOOLEAN DEFAULT FALSE
+        );
+
+        CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(50) PRIMARY KEY,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          title VARCHAR(255) NOT NULL,
+          body TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS notification_reads (
+          id SERIAL PRIMARY KEY,
+          notification_id VARCHAR(50) REFERENCES notifications(id) ON DELETE CASCADE,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(notification_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS subscriptions (
+          id VARCHAR(50) PRIMARY KEY,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          fcm_token TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS stocks (
+          ticker VARCHAR(20) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+          change DECIMAL(15, 4) NOT NULL DEFAULT 0,
+          currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+          previous_close DECIMAL(15, 4) NOT NULL DEFAULT 0,
+          last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_stocks_ticker_lower ON stocks (LOWER(ticker));
+        CREATE INDEX IF NOT EXISTS idx_stocks_name_lower ON stocks (LOWER(name));
+
+        CREATE TABLE IF NOT EXISTS positions (
+          portfolio_id VARCHAR(50) REFERENCES portfolios(id) ON DELETE CASCADE,
+          ticker VARCHAR(20) NOT NULL,
+          quantity DECIMAL(15, 6) NOT NULL DEFAULT 0,
+          avg_buy_price DECIMAL(15, 4) NOT NULL DEFAULT 0,
+          current_price DECIMAL(15, 4) DEFAULT NULL,
+          market_value DECIMAL(15, 4) DEFAULT NULL,
+          pnl DECIMAL(15, 4) DEFAULT NULL,
+          pnl_pct DECIMAL(15, 4) DEFAULT NULL,
+          PRIMARY KEY (portfolio_id, ticker)
+        );
+      `);
+      console.log('[Database] Database tables initialized successfully!');
+
+      // Re-index stocks table on startup as requested
+      try {
+        await pool.query('REINDEX TABLE stocks');
+        console.log('[Database] Table "stocks" re-indexed successfully.');
+      } catch (reindexErr) {
+        console.error('[Database Warning] Failed to re-index stocks table:', reindexErr.message);
+      }
+      
+      // Auto-migrate local JSON database into PostgreSQL if present on boot
+      await migrateJsonToPostgres(pool);
+      
+      // Seed admin if not present
+      const res = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
+      if (res.rows.length === 0) {
+        console.log('[Database] Seeding default admin user...');
+        const adminId = 'u_admin_avi';
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.scryptSync('AVIm76543', salt, 64).toString('hex');
+        const passwordHash = `${salt}:${hash}`;
+        await pool.query(
+          'INSERT INTO users (id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)',
+          [adminId, 'אבי', 'aviariel91@gmail.com', passwordHash, 'admin']
+        );
+        console.log('[Database] Seeding completed.');
+      }
+
+      // Sync all existing portfolios to positions table on boot
+      const startupClient = await pool.connect();
+      try {
+        const portRes = await startupClient.query('SELECT id FROM portfolios');
+        console.log(`[Database] Syncing positions for ${portRes.rows.length} portfolios on startup...`);
+        for (const port of portRes.rows) {
+          await syncPortfolioPositions(port.id, startupClient);
+        }
+        console.log('[Database] Initial startup positions sync completed.');
+      } catch (syncErr) {
+        console.error('[Database Error] Failed startup positions sync:', syncErr.message);
+      } finally {
+        startupClient.release();
+      }
+
+      // Run stock price updater once on startup in background
+      updateAllStockPricesJob().catch(err => {
+        console.error('[Job Error] Failed to run initial stock price update:', err.message);
+      });
+
+      return;
+    } catch (err) {
+      console.warn(`[Database Warning] PostgreSQL connection attempt ${attempt}/${retries} failed:`, err.message);
+      if (attempt < retries) {
+        console.log(`[Database] Waiting ${delayMs / 1000} seconds before retrying...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } else {
+        console.warn('[Database Warning] All database connection attempts failed. Falling back to JSON database mode (data/db.json).');
+        isPgActive = false;
+      }
+    }
+  }
+}
+
+async function init() {
+  console.log('[Init] Starting background database initialization & recovery...');
+  try {
+    await initDbWithRetry();
+    if (isPgActive) {
+      console.log('[Init] Database connection successful. Launching background data recovery (recovery.js)...');
+      const { fork } = require('child_process');
+      const recoveryScript = path.join(__dirname, '..', 'recovery.js');
+      const recoveryProcess = fork(recoveryScript, [], {
+        env: { ...process.env }
+      });
+      recoveryProcess.on('exit', (code) => {
+        console.log(`[Init] Recovery process finished and exited with code ${code}`);
+      });
+      recoveryProcess.on('error', (err) => {
+        console.error('[Init Error] Failed to run recovery.js child process:', err.message);
+      });
+    } else {
+      console.warn('[Init Warning] PostgreSQL is not active. Skipping recovery.js runtime execution.');
+    }
+  } catch (err) {
+    console.error('[Init Error] Background database initialization encountered an error:', err.message);
   }
 }
 
@@ -331,6 +371,7 @@ async function migrateJsonToPostgres(pool) {
           s.fcm_token,
           s.created_at || new Date().toISOString()
         ]);
+      }
     }
 
     // 7. Seed stocks table from SEMANTIC_STOCK_DATABASE catalog + JSON transactions/tips
@@ -2580,12 +2621,12 @@ server.on('upgrade', (req, socket, head) => {
 
 startDailyAITipsCron();
 startStockPricesCron();
-initDb().then(() => {
-  server.listen(PORT, () => {
-    console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
-    console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);
+server.listen(PORT, () => {
+  console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
+  console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);
+  
+  // Trigger background database initialization, migration and recovery asynchronously
+  init().catch(err => {
+    console.error('[Init Error] Post-startup database bootstrap failed:', err.message);
   });
-}).catch(err => {
-  console.error('[Database Error] Failed to initialize database on startup:', err);
-  process.exit(1);
 });

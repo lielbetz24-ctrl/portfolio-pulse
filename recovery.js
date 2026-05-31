@@ -16,6 +16,11 @@ const pool = new Pool({
 async function runRecovery() {
   console.log('[Recovery] Starting safe holdings & shares recovery process...');
 
+  if (!process.env.DATABASE_URL) {
+    console.error('[Recovery Error] DATABASE_URL environment variable is missing. Aborting recovery to prevent local localhost connection attempts.');
+    process.exit(1);
+  }
+
   if (!fs.existsSync(DB_FILE)) {
     console.error('[Recovery Error] Local flat db.json file not found at:', DB_FILE);
     process.exit(1);
@@ -33,7 +38,26 @@ async function runRecovery() {
   const jsonTransactions = db.transactions || [];
   console.log(`[Recovery] Found ${jsonTransactions.length} transactions in the JSON file.`);
 
-  const client = await pool.connect();
+  let client;
+  const retries = 5;
+  const delayMs = 5000;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Recovery] Connecting to PostgreSQL (Attempt ${attempt}/${retries})...`);
+      client = await pool.connect();
+      break;
+    } catch (err) {
+      console.error(`[Recovery Warning] Connection attempt ${attempt} failed:`, err.message);
+      if (attempt < retries) {
+        console.log(`[Recovery] Waiting ${delayMs / 1000} seconds before retrying...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } else {
+        console.error('[Recovery Error] All connection attempts failed. Exiting.');
+        process.exit(1);
+      }
+    }
+  }
+  
   try {
     // 1. Ensure all database tables exist
     await client.query('BEGIN');
