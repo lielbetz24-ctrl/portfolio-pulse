@@ -65,8 +65,32 @@ async function fetchYahooMetadata(ticker) {
 
 async function runSync() {
   console.log('[Inventory Sync] Starting Full Inventory Sync...');
+
+  if (!process.env.DATABASE_URL) {
+    console.error('[Inventory Sync Error] DATABASE_URL environment variable is missing. Aborting sync to prevent local localhost connection attempts.');
+    process.exit(1);
+  }
   
-  const client = await pool.connect();
+  let client;
+  const retries = 5;
+  const delayMs = 5000;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Inventory Sync] Connecting to PostgreSQL (Attempt ${attempt}/${retries})...`);
+      client = await pool.connect();
+      break;
+    } catch (err) {
+      console.error(`[Inventory Sync Warning] Connection attempt ${attempt} failed:`, err.message);
+      if (attempt < retries) {
+        console.log(`[Inventory Sync] Waiting ${delayMs / 1000} seconds before retrying...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } else {
+        console.error('[Inventory Sync Error] All connection attempts failed. Exiting.');
+        process.exit(1);
+      }
+    }
+  }
+
   try {
     // 1. Get initial count in DB
     const beforeCountRes = await client.query('SELECT COUNT(*) FROM stocks');
