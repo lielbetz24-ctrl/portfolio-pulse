@@ -863,8 +863,8 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
             notification: {
               title: title,
               body: body,
-              icon: "/icons/icon-192x192.png", // ודא נתיב נכון
-              badge: "/icons/icon-72x72.png",
+              icon: "/icon.png", // ודא נתיב נכון
+              badge: "/icon.png",
               click_action: "https://portfolio-pulse-mux5.onrender.com/"
             }
           }
@@ -931,13 +931,13 @@ function sendFcmLegacyNotification(token, title, body, icon) {
     notification: {
       title: title,
       body: body,
-      icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png',
+      icon: icon || '/icon.png',
       click_action: '/'
     },
     data: {
       title: title,
       body: body,
-      icon: icon || 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png'
+      icon: icon || '/icon.png'
     }
   };
 
@@ -1026,7 +1026,7 @@ async function triggerFcmNotification(db, targetUserId, title, body) {
 
   console.log(`[FCM Trigger] Dispatching push to ${uniqueTargets.length} unique tokens for target: ${targetUserId || 'all clients'}`);
   
-  const icon = 'https://cdn-icons-png.flaticon.com/512/2910/2910312.png';
+  const icon = '/icon.png';
   
   const promises = uniqueTargets.map(subRecord => {
     const token = subRecord.fcm_token || subRecord.endpoint;
@@ -2229,7 +2229,7 @@ async function handleApi(req, res, pathname, query) {
             }
             
             for (const s of targets) {
-              sendFcmNotification(s.fcm_token, notifTitle, notifBody, '/icons/icon-192x192.png')
+              sendFcmNotification(s.fcm_token, notifTitle, notifBody, '/icon.png')
                 .then(res => {
                   if (res.invalidToken) {
                     pool.query('DELETE FROM subscriptions WHERE id = $1', [s.id]).catch(() => {});
@@ -2285,7 +2285,7 @@ async function handleApi(req, res, pathname, query) {
           }
           
           for (const s of targets) {
-            sendFcmNotification(s.fcm_token, newNotif.title, newNotif.body, '/icons/icon-192x192.png')
+            sendFcmNotification(s.fcm_token, newNotif.title, newNotif.body, '/icon.png')
               .then(res => {
                 if (res.invalidToken) {
                   const innerDb = readDb();

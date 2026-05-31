@@ -3364,8 +3364,8 @@ async function pollNotifications() {
                     const reg = await navigator.serviceWorker.ready;
                     reg.showNotification(notif.title, {
                         body: notif.body,
-                        icon: '/favicon.ico',
-                        badge: '/favicon.ico',
+                        icon: '/icon.png',
+                        badge: '/icon.png',
                         vibrate: [100, 50, 100],
                         data: { url: '/' }
                     });
