@@ -686,6 +686,7 @@ function sendWebSocketMessage(userId, messageObj) {
   const userSockets = activeSockets.get(userId);
   if (userSockets) {
     const text = JSON.stringify(messageObj);
+    console.log(`[WS Broadcast] Dispatching real-time event to ${userId}:`, text);
     const frame = encodeWSFrame(text);
     for (const socket of userSockets) {
       try {
