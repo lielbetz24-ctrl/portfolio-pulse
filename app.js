@@ -100,6 +100,25 @@ let usdToIlsRate = 3.75; // שער חליפין דינמי, יימשך בזמן 
 let wsClient = null;
 let wsPingInterval = null;
 
+function formatTipTimestamp(dateOrString) {
+    if (!dateOrString) return '';
+    try {
+        const d = new Date(dateOrString);
+        if (isNaN(d.getTime())) {
+            return dateOrString;
+        }
+        const pad = (num) => String(num).padStart(2, '0');
+        const hh = pad(d.getHours());
+        const mm = pad(d.getMinutes());
+        const dd = pad(d.getDate());
+        const MM = pad(d.getMonth() + 1);
+        const yyyy = d.getFullYear();
+        return `${hh}:${mm}, ${dd}/${MM}/${yyyy}`;
+    } catch (e) {
+        return dateOrString;
+    }
+}
+
 function initWebSocket() {
     if (!currentUser) return;
     
@@ -2823,7 +2842,7 @@ function renderAdminTipsList() {
                 </div>
                 <div class="flex-between" style="margin-top: 6px;">
                     <span class="tip-tag ${tagClass}">${tagText}</span>
-                    <span class="text-muted" style="font-size:0.75rem;">${tip.date}</span>
+                    <span class="text-muted" style="font-size:0.75rem;">${formatTipTimestamp(tip.created_at || tip.date)}</span>
                 </div>
                 <p class="tip-desc" style="margin-top: 8px; font-size: 0.85rem; color: var(--text-primary);">${tip.content}</p>
                 ${tip.image_url ? `<img src="${tip.image_url}" style="max-width: 100%; border-radius: 6px; object-fit: cover; margin-top: 8px; cursor: pointer; max-height: 120px; display: block;" onclick="openLightbox('${tip.image_url}')">` : ''}
@@ -3686,7 +3705,7 @@ function renderPersonalChatMessages() {
             div.style.color = 'var(--text-primary)';
             div.style.borderRadius = '16px 16px 16px 2px';
             
-            const timeStr = msg.date || '';
+            const timeStr = formatTipTimestamp(msg.created_at || msg.date);
             const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: flex-end;">${timeStr}</span>` : '';
             
             div.innerHTML = `
@@ -3702,7 +3721,7 @@ function renderPersonalChatMessages() {
             div.style.color = '#e2beff';
             div.style.borderRadius = '16px 16px 2px 16px';
             
-            const timeStr = msg.date || '';
+            const timeStr = formatTipTimestamp(msg.created_at || msg.date);
             const timeSpan = timeStr ? `<span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3); margin-top: 4px; align-self: flex-start;">${timeStr}</span>` : '';
             
             div.innerHTML = `
@@ -3914,7 +3933,7 @@ function renderAdminClientChatHistory() {
             div.style.borderRadius = '16px 16px 16px 2px';
             
             const senderName = 'הלקוח';
-            const timeStr = msg.date || '';
+            const timeStr = formatTipTimestamp(msg.created_at || msg.date);
             const timeSpan = timeStr ? `<div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 4px;">
                 <span style="font-size: 0.65rem; color: rgba(255, 255, 255, 0.3);">${timeStr}</span>
             </div>` : '';
@@ -3933,7 +3952,7 @@ function renderAdminClientChatHistory() {
             div.style.borderRadius = '16px 16px 2px 16px';
             
             const senderName = 'אני';
-            const timeStr = msg.date || '';
+            const timeStr = formatTipTimestamp(msg.created_at || msg.date);
             
             // Read receipt checkmark for Avi's messages
             const checkColor = msg.is_read ? '#2196F3' : 'rgba(255, 255, 255, 0.35)';

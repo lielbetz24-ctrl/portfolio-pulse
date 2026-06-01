@@ -2139,6 +2139,7 @@ async function handleApi(req, res, pathname, query) {
           target_user_id: t.target_user_id,
           is_read: t.is_read || false,
           image_url: t.image_url,
+          created_at: t.date ? new Date(t.date).toISOString() : null,
           date: t.date ? new Date(t.date).toISOString().split('T')[0] : null
         }));
         
@@ -2230,6 +2231,7 @@ async function handleApi(req, res, pathname, query) {
           author_name: recommenderName,
           target_user_id: targetUserId,
           image_url: body.image_url || null,
+          created_at: dateStr,
           date: dateStr.split('T')[0]
         };
         
