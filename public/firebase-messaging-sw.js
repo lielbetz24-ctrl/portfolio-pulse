@@ -23,6 +23,7 @@ console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW con
 // Handle notification click to focus active PWA or WebView window
 self.addEventListener('notificationclick', event => {
   console.log('⭐⭐⭐ [Firebase SW] Notification clicked:', event.notification);
+  console.log('⭐⭐⭐ [Firebase SW] event.notification.data:', event.notification.data);
   event.notification.close();
 
   // Extract deep link url from data

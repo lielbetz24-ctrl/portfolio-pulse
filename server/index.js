@@ -883,6 +883,7 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon, url) {
       };
 
       const payloadString = JSON.stringify(payload);
+      console.log('⭐⭐⭐ [FCM v1 Payload Builder] data section:', payload.message.data);
 
       const options = {
         method: 'POST',
@@ -954,6 +955,7 @@ function sendFcmLegacyNotification(token, title, body, icon, url) {
   };
 
   const payloadString = JSON.stringify(payload);
+  console.log('⭐⭐⭐ [FCM Legacy Payload Builder] data section:', payload.data);
 
   const options = {
     method: 'POST',
