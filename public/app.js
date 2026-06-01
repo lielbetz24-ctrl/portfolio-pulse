@@ -25,6 +25,11 @@ async function initFirebase() {
             if (payload && payload.notification) {
                 showToast(`${payload.notification.title}: ${payload.notification.body}`, 'success');
             }
+            // Dynamic Deep Linking Navigation for foreground pushes
+            if (payload && payload.data && payload.data.url) {
+                console.log('⭐⭐⭐ [Firebase] Navigating from foreground notification:', payload.data.url);
+                handleDeepLinkNavigation(payload.data.url);
+            }
         });
 
         // Deprecated messaging.onTokenRefresh removed for Firebase v10+ compatibility.
@@ -317,11 +322,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // Listen for Service Worker navigation messages
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.addEventListener('message', event => {
+            console.log('⭐⭐⭐ [Service Worker Message Listener] Received message:', event.data);
             if (event.data) {
                 if (event.data.type === 'NAVIGATE') {
+                    console.log('⭐⭐⭐ [Service Worker Message Listener] Processing NAVIGATE command for url:', event.data.url);
                     handleDeepLinkNavigation(event.data.url);
                 } else if (event.data.type === 'SHOW_ALERT') {
+                    console.log('⭐⭐⭐ [Service Worker Message Listener] Processing SHOW_ALERT command. Payload:', event.data.payload);
                     alert('Payload: ' + JSON.stringify(event.data.payload));
+                    if (event.data.payload && event.data.payload.url) {
+                        console.log('⭐⭐⭐ [Service Worker Message Listener] Auto-navigating to payload URL:', event.data.payload.url);
+                        handleDeepLinkNavigation(event.data.payload.url);
+                    }
+                } else if (event.data.url) {
+                    console.log('⭐⭐⭐ [Service Worker Message Listener] Direct URL fallback navigation:', event.data.url);
+                    handleDeepLinkNavigation(event.data.url);
                 }
             }
         });
@@ -922,6 +937,23 @@ function handleDeepLinkNavigation(url) {
         const pathParts = pathname.split('/');
         console.log('⭐⭐⭐ [handleDeepLinkNavigation] Pathname:', pathname, 'Parts:', pathParts);
         
+        // If pathname is a known view, switch to it directly
+        const cleanPath = pathname.replace(/^\//, ''); // remove leading slash
+        const knownViews = ['dashboard', 'transactions', 'ai-tips', 'admin-dashboard', 'admin-tips', 'client-detail'];
+        if (knownViews.includes(cleanPath)) {
+            console.log('⭐⭐⭐ [handleDeepLinkNavigation] Matched direct view:', cleanPath);
+            if (currentUser) {
+                switchView(cleanPath);
+                if (window.location.pathname !== pathname) {
+                    window.history.pushState(null, '', pathname);
+                }
+            } else {
+                console.log('⭐⭐⭐ [handleDeepLinkNavigation] User not logged in, saving pending deep link for direct view:', url);
+                sessionStorage.setItem('pending_deep_link', url);
+            }
+            return;
+        }
+
         if (pathParts[1] === 'tips' && pathParts[2]) {
             const tipId = pathParts[2];
             console.log('⭐⭐⭐ [handleDeepLinkNavigation] Parsed Tip ID:', tipId);
@@ -945,7 +977,15 @@ function handleDeepLinkNavigation(url) {
                 sessionStorage.setItem('pending_deep_link', url);
             }
         } else {
-            console.log('⭐⭐⭐ [handleDeepLinkNavigation] URL is not a tip link. No action taken.');
+            console.log('⭐⭐⭐ [handleDeepLinkNavigation] URL is not a tip link. Checking fallback hash/view...');
+            // Try matching pathParts[1] if it is a view name
+            if (knownViews.includes(pathParts[1])) {
+                if (currentUser) {
+                    switchView(pathParts[1]);
+                } else {
+                    sessionStorage.setItem('pending_deep_link', url);
+                }
+            }
         }
     } catch (e) {
         console.error('⭐⭐⭐ [handleDeepLinkNavigation] Error during deep link processing:', e);
