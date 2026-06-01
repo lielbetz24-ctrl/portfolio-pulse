@@ -317,8 +317,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Listen for Service Worker navigation messages
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.addEventListener('message', event => {
-            if (event.data && event.data.type === 'NAVIGATE') {
-                handleDeepLinkNavigation(event.data.url);
+            if (event.data) {
+                if (event.data.type === 'NAVIGATE') {
+                    handleDeepLinkNavigation(event.data.url);
+                } else if (event.data.type === 'SHOW_ALERT') {
+                    alert('Payload: ' + JSON.stringify(event.data.payload));
+                }
             }
         });
     }

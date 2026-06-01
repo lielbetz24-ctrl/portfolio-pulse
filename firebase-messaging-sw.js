@@ -24,6 +24,7 @@ console.log('⭐⭐⭐ [Firebase SW] Firebase initialized successfully in SW con
 self.addEventListener('notificationclick', event => {
   console.log('⭐⭐⭐ [Firebase SW] Notification clicked:', event.notification);
   console.log('⭐⭐⭐ [Firebase SW] event.notification.data:', event.notification.data);
+  console.log('Clicked notification. Data received:', event.notification.data);
   event.notification.close();
 
   // Extract deep link url from data
@@ -39,6 +40,8 @@ self.addEventListener('notificationclick', event => {
             client.focus();
             // Send a message to navigate without reloading!
             client.postMessage({ type: 'NAVIGATE', url: targetUrl });
+            // Send a message to alert the payload safely!
+            client.postMessage({ type: 'SHOW_ALERT', payload: event.notification.data });
             return;
           }
         } catch (e) {
