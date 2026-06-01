@@ -32,8 +32,23 @@ async function initFirebase() {
             }
         });
 
-        // Deprecated messaging.onTokenRefresh removed for Firebase v10+ compatibility.
-        // Token retrieval and refreshing are handled robustly on startup and user setup via checkAndSelfHealPushNotifications.
+        // Native Token Refresh Listener to automatically synchronize tokens when they change
+        if (typeof messaging.onTokenRefresh === 'function') {
+            messaging.onTokenRefresh(async () => {
+                try {
+                    console.log('⭐⭐⭐ [FCM Client] Native onTokenRefresh triggered. Fetching fresh token...');
+                    const refreshedToken = await messaging.getToken();
+                    if (refreshedToken) {
+                        console.log('⭐⭐⭐ [FCM Client] Saving refreshed token to server silently:', refreshedToken);
+                        await API.request('POST', '/api/save-fcm-token', { fcm_token: refreshedToken });
+                        localStorage.setItem('last_saved_fcm_token', refreshedToken);
+                        localStorage.setItem('last_fcm_token', refreshedToken);
+                    }
+                } catch (err) {
+                    console.error('[FCM Client Error] Failed to refresh token silently:', err);
+                }
+            });
+        }
     } catch (e) {
         console.warn('⚠️ [Firebase] Failed to initialize Firebase:', e);
     }
@@ -144,14 +159,27 @@ async function checkAndSelfHealPushNotifications() {
                 vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
             });
 
-            const lastSavedToken = localStorage.getItem('last_fcm_token');
-            if (fcmToken && fcmToken !== lastSavedToken) {
-                console.log('[Self-Healing] FCM Token is refreshed or changed. Self-healing database...', fcmToken);
-                await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
-                localStorage.setItem('last_fcm_token', fcmToken);
-                console.log('[Self-Healing] FCM Token successfully healed on server.');
-            } else {
-                console.log('[Self-Healing] Push status is fully healthy.');
+            if (fcmToken) {
+                let shouldUpdate = false;
+                try {
+                    const savedResponse = await API.request('GET', '/api/notifications/my-token');
+                    const savedToken = savedResponse ? savedResponse.fcm_token : null;
+                    console.log('[Self-Healing] Comparing tokens. Fresh:', fcmToken, '| Saved:', savedToken);
+                    shouldUpdate = (fcmToken !== savedToken);
+                } catch (serverErr) {
+                    console.error('[Self-Healing Error] Failed to fetch token from server:', serverErr);
+                    shouldUpdate = true; // Fallback
+                }
+
+                if (shouldUpdate) {
+                    console.log('[Self-Healing] FCM Token is refreshed or changed. Self-healing database...', fcmToken);
+                    await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
+                    localStorage.setItem('last_fcm_token', fcmToken);
+                    localStorage.setItem('last_saved_fcm_token', fcmToken);
+                    console.log('[Self-Healing] FCM Token successfully healed on server.');
+                } else {
+                    console.log('[Self-Healing] Push status is fully healthy.');
+                }
             }
         } else if (!reg) {
             console.warn('[Self-Healing] Active PWA Service Worker not registered! Self-healing registration...');
@@ -168,9 +196,23 @@ async function checkAndSelfHealPushNotifications() {
                     vapidKey: (firebaseConfigData && firebaseConfigData.vapidKey) || undefined
                 });
                 if (fcmToken) {
-                    await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
-                    localStorage.setItem('last_fcm_token', fcmToken);
-                    console.log('[Self-Healing] Successfully self-healed PWA Service Worker registration.');
+                    let shouldUpdate = false;
+                    try {
+                        const savedResponse = await API.request('GET', '/api/notifications/my-token');
+                        const savedToken = savedResponse ? savedResponse.fcm_token : null;
+                        console.log('[Self-Healing] Comparing tokens. Fresh:', fcmToken, '| Saved:', savedToken);
+                        shouldUpdate = (fcmToken !== savedToken);
+                    } catch (serverErr) {
+                        console.error('[Self-Healing Error] Failed to fetch token from server:', serverErr);
+                        shouldUpdate = true; // Fallback
+                    }
+
+                    if (shouldUpdate) {
+                        await API.request('PUT', '/api/update-token', { fcm_token: fcmToken });
+                        localStorage.setItem('last_fcm_token', fcmToken);
+                        localStorage.setItem('last_saved_fcm_token', fcmToken);
+                        console.log('[Self-Healing] Successfully self-healed PWA Service Worker registration.');
+                    }
                 }
             }
         }

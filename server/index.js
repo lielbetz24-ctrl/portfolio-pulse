@@ -2416,13 +2416,16 @@ async function handleApi(req, res, pathname, query) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM subscriptions WHERE user_id = $1', [user.id]);
+        // Delete any existing rows matching either user.id OR fcm_token to prevent duplicates
         if (fcm_token) {
+          await client.query('DELETE FROM subscriptions WHERE user_id = $1 OR fcm_token = $2', [user.id, fcm_token]);
           const subId = uid('sub');
           await client.query(
             'INSERT INTO subscriptions (id, user_id, fcm_token) VALUES ($1, $2, $3)',
             [subId, user.id, fcm_token]
           );
+        } else {
+          await client.query('DELETE FROM subscriptions WHERE user_id = $1', [user.id]);
         }
         await client.query('COMMIT');
         client.release();
@@ -2435,15 +2438,17 @@ async function handleApi(req, res, pathname, query) {
     } else {
       const db = readDb();
       db.subscriptions = db.subscriptions || [];
-      db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
-      
+      // Clean delete existing references for user OR token
       if (fcm_token) {
+        db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id && s.fcm_token !== fcm_token);
         db.subscriptions.push({
           id: uid('sub'),
           user_id: user.id,
           fcm_token: fcm_token,
           created_at: new Date().toISOString()
         });
+      } else {
+        db.subscriptions = db.subscriptions.filter(s => s.user_id !== user.id);
       }
       writeDb(db);
       return sendJson(res, 200, { ok: true });

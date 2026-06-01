@@ -32,8 +32,23 @@ async function initFirebase() {
             }
         });
 
-        // Deprecated messaging.onTokenRefresh removed for Firebase v10+ compatibility.
-        // Token retrieval and refreshing are handled robustly on startup and user setup via refreshPushSubscription.
+        // Native Token Refresh Listener to automatically synchronize tokens when they change
+        if (typeof messaging.onTokenRefresh === 'function') {
+            messaging.onTokenRefresh(async () => {
+                try {
+                    console.log('⭐⭐⭐ [FCM Client] Native onTokenRefresh triggered. Fetching fresh token...');
+                    const refreshedToken = await messaging.getToken();
+                    if (refreshedToken) {
+                        console.log('⭐⭐⭐ [FCM Client] Saving refreshed token to server silently:', refreshedToken);
+                        await API.request('POST', '/api/save-fcm-token', { fcm_token: refreshedToken });
+                        localStorage.setItem('last_saved_fcm_token', refreshedToken);
+                        localStorage.setItem('last_fcm_token', refreshedToken);
+                    }
+                } catch (err) {
+                    console.error('[FCM Client Error] Failed to refresh token silently:', err);
+                }
+            });
+        }
     } catch (e) {
         console.error('[Self-Healing Error] Failed to initialize Firebase:', e);
     }
