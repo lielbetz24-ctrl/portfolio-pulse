@@ -25,20 +25,27 @@ self.addEventListener('notificationclick', event => {
   console.log('⭐⭐⭐ [Firebase SW] Notification clicked:', event.notification);
   event.notification.close();
 
+  // Extract deep link url from data
+  const payloadData = event.notification.data || {};
+  const targetUrl = payloadData.url || '/';
+  console.log('⭐⭐⭐ [Firebase SW] Extracted target URL:', targetUrl);
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
       for (const client of clientList) {
         try {
-          const clientPath = new URL(client.url).pathname;
-          if ((clientPath === '/' || clientPath === '/index.html') && 'focus' in client) {
-            return client.focus();
+          if ('focus' in client) {
+            client.focus();
+            // Send a message to navigate without reloading!
+            client.postMessage({ type: 'NAVIGATE', url: targetUrl });
+            return;
           }
         } catch (e) {
           // Ignore URL parse failures
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow('/');
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

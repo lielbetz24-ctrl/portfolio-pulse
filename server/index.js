@@ -849,7 +849,7 @@ async function getGoogleAccessToken(serviceAccount) {
   });
 }
 
-function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
+function sendFcmV1Notification(serviceAccount, token, title, body, icon, url) {
   return getGoogleAccessToken(serviceAccount)
     .then(accessToken => {
       const projectId = serviceAccount.project_id;
@@ -875,6 +875,9 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
               badge: "/icon.png",
               click_action: "https://portfolio-pulse-mux5.onrender.com/"
             }
+          },
+          data: {
+            url: url || '/'
           }
         }
       };
@@ -927,7 +930,7 @@ function sendFcmV1Notification(serviceAccount, token, title, body, icon) {
     });
 }
 
-function sendFcmLegacyNotification(token, title, body, icon) {
+function sendFcmLegacyNotification(token, title, body, icon, url) {
   const serverKey = process.env.FIREBASE_SERVER_KEY;
   if (!serverKey) {
     console.warn('[FCM Legacy] FIREBASE_SERVER_KEY is not defined. Skipping notification.');
@@ -945,7 +948,8 @@ function sendFcmLegacyNotification(token, title, body, icon) {
     data: {
       title: title,
       body: body,
-      icon: icon || '/icon.png'
+      icon: icon || '/icon.png',
+      url: url || '/'
     }
   };
 
@@ -996,22 +1000,22 @@ function sendFcmLegacyNotification(token, title, body, icon) {
   });
 }
 
-function sendFcmNotification(token, title, body, icon) {
+function sendFcmNotification(token, title, body, icon, url) {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       if (serviceAccount && serviceAccount.private_key && serviceAccount.client_email) {
-        return sendFcmV1Notification(serviceAccount, token, title, body, icon);
+        return sendFcmV1Notification(serviceAccount, token, title, body, icon, url);
       }
     } catch (e) {
       console.error('[FCM] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON:', e.message);
     }
   }
 
-  return sendFcmLegacyNotification(token, title, body, icon);
+  return sendFcmLegacyNotification(token, title, body, icon, url);
 }
 
-async function triggerFcmNotification(db, targetUserId, title, body) {
+async function triggerFcmNotification(db, targetUserId, title, body, url) {
   db.subscriptions = db.subscriptions || [];
   let targets = [];
   
@@ -1043,7 +1047,7 @@ async function triggerFcmNotification(db, targetUserId, title, body) {
       return Promise.resolve({ success: true, mock: true });
     }
 
-    return sendFcmNotification(token, title, body, icon)
+    return sendFcmNotification(token, title, body, icon, url)
       .then(res => {
         if (!res.success) {
           console.warn(`[FCM Trigger] Failed to deliver to ${subRecord.id}:`, res.error);
@@ -2257,7 +2261,7 @@ async function handleApi(req, res, pathname, query) {
             }
             
             for (const s of targets) {
-              sendFcmNotification(s.fcm_token, notifTitle, notifBody, '/icon.png')
+              sendFcmNotification(s.fcm_token, notifTitle, notifBody, '/icon.png', `/tips/${newTip.id}`)
                 .then(res => {
                   if (res.invalidToken) {
                     pool.query('DELETE FROM subscriptions WHERE id = $1', [s.id]).catch(() => {});
@@ -2320,7 +2324,7 @@ async function handleApi(req, res, pathname, query) {
           }
           
           for (const s of targets) {
-            sendFcmNotification(s.fcm_token, newNotif.title, newNotif.body, '/icon.png')
+            sendFcmNotification(s.fcm_token, newNotif.title, newNotif.body, '/icon.png', `/tips/${tip.id}`)
               .then(res => {
                 if (res.invalidToken) {
                   const innerDb = readDb();

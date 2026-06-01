@@ -309,6 +309,20 @@ function initWebSocket() {
 
 // ==================== 1. אתחול והגדרת נתוני ברירת מחדל (Bootstrap) ====================
 document.addEventListener("DOMContentLoaded", () => {
+    // Check for deep link on startup
+    if (window.location.pathname.startsWith('/tips/')) {
+        sessionStorage.setItem('pending_deep_link', window.location.href);
+    }
+
+    // Listen for Service Worker navigation messages
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data && event.data.type === 'NAVIGATE') {
+                handleDeepLinkNavigation(event.data.url);
+            }
+        });
+    }
+
     initLocalCache();
     initTransactionModalEvents();
     initTipModalEvents();
@@ -596,6 +610,13 @@ async function setupAppForUser() {
     initWebSocket();
 
     showToast(`ברוך הבא, ${currentUser.name}!`, 'success');
+
+    // Process pending deep link navigation
+    const pendingLink = sessionStorage.getItem('pending_deep_link');
+    if (pendingLink) {
+        sessionStorage.removeItem('pending_deep_link');
+        setTimeout(() => handleDeepLinkNavigation(pendingLink), 500);
+    }
 }
 
 function showAuthScreen() {
@@ -815,6 +836,13 @@ function handleLogout() {
 function switchView(view) {
     activeView = view;
     
+    // Reset URL path if we navigate away from tips to keep the browser state clean
+    if (view !== 'ai-tips' && view !== 'admin-tips') {
+        if (window.location.pathname !== '/') {
+            window.history.pushState(null, '', '/');
+        }
+    }
+    
     // עדכון הטאב הפעיל בניווט הצדי (דסקטופ)
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     const navItem = document.getElementById(`nav-${view}`);
@@ -873,6 +901,51 @@ function switchView(view) {
     } else if (view === 'client-detail') {
         titleEl.textContent = 'צפייה בתיק לקוח';
         subtitleEl.textContent = 'סקירה מלאה, הרכב נכסים והיסטוריית פעולות של הלקוח הנבחר';
+    }
+}
+
+// ==================== 3.2 ניווט Deep Linking להתראות (Deep Linking & PNL Highlight) ====================
+function handleDeepLinkNavigation(url) {
+    if (!url) return;
+    try {
+        const parsedUrl = new URL(url, window.location.origin);
+        const pathname = parsedUrl.pathname;
+        const pathParts = pathname.split('/');
+        
+        if (pathParts[1] === 'tips' && pathParts[2]) {
+            const tipId = pathParts[2];
+            if (currentUser) {
+                const role = currentUser.role === 'admin' ? 'admin' : 'client';
+                switchView(role === 'admin' ? 'admin-tips' : 'ai-tips');
+                if (window.location.pathname !== pathname) {
+                    window.history.pushState(null, '', pathname);
+                }
+                setTimeout(() => highlightTipInUI(tipId, role), 300);
+            } else {
+                sessionStorage.setItem('pending_deep_link', url);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to parse deep link URL:', e);
+    }
+}
+
+function highlightTipInUI(tipId, role) {
+    const elementId = `${role}-tip-${tipId}`;
+    const el = document.getElementById(elementId);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'all 0.5s ease';
+        const originalBackground = el.style.background || '';
+        el.style.background = 'rgba(0, 229, 255, 0.15)';
+        el.style.boxShadow = '0 0 15px rgba(0, 229, 255, 0.4)';
+        el.style.transform = 'scale(1.02)';
+        
+        setTimeout(() => {
+            el.style.background = originalBackground;
+            el.style.boxShadow = '';
+            el.style.transform = '';
+        }, 3000);
     }
 }
 
@@ -2095,6 +2168,7 @@ function renderAITips() {
     filteredTips.forEach(tip => {
         const div = document.createElement('div');
         div.className = 'tip-item';
+        div.id = `client-tip-${tip.id}`;
 
         const isGeneral = tip.ticker === null;
         const author = tip.recommender && tip.recommender !== 'avi' && tip.recommender !== 'ai' && tip.recommender !== 'client' ? tip.recommender : 'אבי';
@@ -2858,6 +2932,7 @@ function renderAdminTipsList() {
     aviTips.forEach(tip => {
         const div = document.createElement('div');
         div.className = 'tip-item';
+        div.id = `admin-tip-${tip.id}`;
 
         const isGeneral = tip.ticker === null;
         const tagText = isGeneral ? 'כללי' : tip.ticker;
