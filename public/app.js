@@ -1008,7 +1008,11 @@ function buildHoldingMainRow(holding, idx, prefix) {
 
     let dailyChangeHtml;
     const dailyChange = holding.daily_change ?? stockInfo.change;
-    const dailyReturn = holding.daily_return_usd ?? holding.daily_change_usd ?? 0;
+    let dailyReturn = holding.daily_return_usd ?? holding.daily_change_usd ?? 0;
+    if (dailyReturn === 0 && dailyChange !== null && dailyChange !== 0 && holding.current_price > 0 && holding.quantity > 0) {
+        const prevClose = holding.current_price / (1 + dailyChange / 100);
+        dailyReturn = holding.quantity * (holding.current_price - prevClose);
+    }
     if (dailyChange != null && !isNaN(dailyChange)) {
         const changeClass = dailyChange >= 0 ? 'pnl-positive' : 'pnl-negative';
         const changePrefix = dailyChange >= 0 ? '+' : '';
