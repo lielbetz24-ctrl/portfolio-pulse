@@ -2735,6 +2735,55 @@ async function handleApi(req, res, pathname, query) {
       return await handleApi(req, res, pathname, url.searchParams);
     }
 
+    if (pathname === '/trigger-test-push' && req.method === 'GET') {
+      try {
+        let targets = [];
+        if (isPgActive) {
+          const subRes = await pool.query('SELECT * FROM subscriptions');
+          targets = subRes.rows;
+        } else {
+          const db = readDb();
+          targets = db.subscriptions || [];
+        }
+
+        // Deduplicate target records by FCM token/endpoint to guarantee we never send twice to the same device
+        const seenTokens = new Set();
+        const uniqueTargets = [];
+        for (const s of targets) {
+          const t = s.fcm_token || s.endpoint;
+          if (t && !seenTokens.has(t) && !t.startsWith('mock-')) {
+            seenTokens.add(t);
+            uniqueTargets.push(s);
+          }
+        }
+
+        console.log(`[Test Push Endpoint] Sending push to ${uniqueTargets.length} unique tokens`);
+        const title = 'בדיקת Deep Linking';
+        const body = 'לחץ כאן כדי לבדוק את הקישור הממוקד';
+        const url = '/tips/test_123';
+
+        for (const s of uniqueTargets) {
+          const token = s.fcm_token || s.endpoint;
+          sendFcmNotification(token, title, body, '/icon.png', url)
+            .then(res => {
+              if (res.invalidToken) {
+                if (isPgActive) {
+                  pool.query('DELETE FROM subscriptions WHERE id = $1', [s.id]).catch(() => {});
+                } else {
+                  const innerDb = readDb();
+                  innerDb.subscriptions = innerDb.subscriptions.filter(x => x.id !== s.id);
+                  writeDb(innerDb);
+                }
+              }
+            }).catch(() => {});
+        }
+
+        return sendJson(res, 200, { status: "Test push triggered", count: uniqueTargets.length });
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    }
+
     if (pathname === '/firebase-messaging-sw.js') {
       const swPath = path.join(PUBLIC, 'firebase-messaging-sw.js');
       res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
