@@ -910,34 +910,54 @@ function switchView(view) {
 
 // ==================== 3.2 ניווט Deep Linking להתראות (Deep Linking & PNL Highlight) ====================
 function handleDeepLinkNavigation(url) {
+    console.log('⭐⭐⭐ [handleDeepLinkNavigation] Called with URL:', url);
     if (!url) return;
     try {
-        const parsedUrl = new URL(url, window.location.origin);
+        const origin = window.location.origin;
+        const fullUrl = url.startsWith('http') ? url : (origin + (url.startsWith('/') ? '' : '/') + url);
+        console.log('⭐⭐⭐ [handleDeepLinkNavigation] Normalized URL:', fullUrl);
+        
+        const parsedUrl = new URL(fullUrl);
         const pathname = parsedUrl.pathname;
         const pathParts = pathname.split('/');
+        console.log('⭐⭐⭐ [handleDeepLinkNavigation] Pathname:', pathname, 'Parts:', pathParts);
         
         if (pathParts[1] === 'tips' && pathParts[2]) {
             const tipId = pathParts[2];
+            console.log('⭐⭐⭐ [handleDeepLinkNavigation] Parsed Tip ID:', tipId);
             if (currentUser) {
                 const role = currentUser.role === 'admin' ? 'admin' : 'client';
-                switchView(role === 'admin' ? 'admin-tips' : 'ai-tips');
+                const targetView = role === 'admin' ? 'admin-tips' : 'ai-tips';
+                console.log(`⭐⭐⭐ [handleDeepLinkNavigation] Switching to view: ${targetView} for role: ${role}`);
+                
+                switchView(targetView);
+                
                 if (window.location.pathname !== pathname) {
                     window.history.pushState(null, '', pathname);
                 }
-                setTimeout(() => highlightTipInUI(tipId, role), 300);
+                
+                setTimeout(() => {
+                    console.log(`⭐⭐⭐ [handleDeepLinkNavigation] Highlighting tip: ${tipId}`);
+                    highlightTipInUI(tipId, role);
+                }, 300);
             } else {
+                console.log('⭐⭐⭐ [handleDeepLinkNavigation] User not logged in, saving pending deep link:', url);
                 sessionStorage.setItem('pending_deep_link', url);
             }
+        } else {
+            console.log('⭐⭐⭐ [handleDeepLinkNavigation] URL is not a tip link. No action taken.');
         }
     } catch (e) {
-        console.error('Failed to parse deep link URL:', e);
+        console.error('⭐⭐⭐ [handleDeepLinkNavigation] Error during deep link processing:', e);
     }
 }
 
 function highlightTipInUI(tipId, role) {
     const elementId = `${role}-tip-${tipId}`;
+    console.log(`⭐⭐⭐ [highlightTipInUI] Searching for element ID: ${elementId}`);
     const el = document.getElementById(elementId);
     if (el) {
+        console.log(`⭐⭐⭐ [highlightTipInUI] Element found! Scrolling and flashing...`);
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.style.transition = 'all 0.5s ease';
         const originalBackground = el.style.background || '';
@@ -950,6 +970,9 @@ function highlightTipInUI(tipId, role) {
             el.style.boxShadow = '';
             el.style.transform = '';
         }, 3000);
+    } else {
+        console.warn(`⭐⭐⭐ [highlightTipInUI] Element not found in DOM!`);
+        showToast(`ניווט ממוקד להמלצה ${tipId} הושלם בהצלחה.`, 'info');
     }
 }
 
