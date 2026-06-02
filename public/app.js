@@ -540,7 +540,11 @@ async function fetchLivePrices() {
                     if (stock.currency === 'ILA' || stock.currency === 'GBp' || price > 1000) {
                         priceInIls = price / 100;
                     }
-                    price = priceInIls / usdToIlsRate;
+                    if (typeof Decimal !== 'undefined') {
+                        price = new Decimal(priceInIls).div(new Decimal(usdToIlsRate)).toNumber();
+                    } else {
+                        price = priceInIls / usdToIlsRate;
+                    }
                 }
                 MOCK_STOCK_PRICES[symbol] = { name: stock.name, price, change, previousClose: stock.previousClose };
             }
@@ -1590,6 +1594,8 @@ function renderTransactionsTable() {
             hour: '2-digit', minute: '2-digit'
         });
 
+        const exchangeRateText = tx.exchange_rate ? `₪${parseFloat(tx.exchange_rate).toFixed(4)}` : '—';
+
         tr.innerHTML = `
             <td class="tx-date">${formattedDate}</td>
             <td><span class="${typeClass}">${typeText}</span></td>
@@ -1597,6 +1603,7 @@ function renderTransactionsTable() {
             <td>${qtyText}</td>
             <td>${priceText}</td>
             <td class="summary-total" style="font-size: 0.95rem; color: var(--text-primary)">${formatCurrency(totalSum)}</td>
+            <td style="font-family: var(--font-numbers); font-weight: 500;">${exchangeRateText}</td>
             <td>
                 <span class="status-tag">
                     <span class="material-icons-round" style="font-size: 16px;">check_circle</span>
@@ -2039,7 +2046,11 @@ async function fetchSingleLivePrice(ticker) {
                     if (stock.currency === 'ILA' || stock.currency === 'GBp' || price > 1000) {
                         priceInIls = price / 100;
                     }
-                    price = priceInIls / usdToIlsRate;
+                    if (typeof Decimal !== 'undefined') {
+                        price = new Decimal(priceInIls).div(new Decimal(usdToIlsRate)).toNumber();
+                    } else {
+                        price = priceInIls / usdToIlsRate;
+                    }
                 }
                 
                 MOCK_STOCK_PRICES[symbol] = {
@@ -2164,7 +2175,8 @@ async function handleTransactionSubmit(event) {
             action_type: actionType,
             quantity: (actionType === 'deposit' || actionType === 'withdraw') ? 0 : qty,
             price,
-            transaction_date: new Date().toISOString()
+            transaction_date: new Date().toISOString(),
+            exchange_rate: usdToIlsRate
         });
 
         await loadUserData();
@@ -2910,6 +2922,8 @@ async function viewClientPortfolio(clientId) {
                 total = tx.price;
             }
 
+            const exchangeRateText = tx.exchange_rate ? `₪${parseFloat(tx.exchange_rate).toFixed(4)}` : '—';
+
             tr.innerHTML = `
                 <td class="tx-date">${formattedDate}</td>
                 <td><span class="tx-badge ${typeClass}">${typeText}</span></td>
@@ -2917,6 +2931,7 @@ async function viewClientPortfolio(clientId) {
                 <td>${tx.quantity > 0 ? tx.quantity : '—'}</td>
                 <td>${formatCurrency(tx.price)}</td>
                 <td class="summary-total" style="font-size:0.95rem;">${formatCurrency(total)}</td>
+                <td style="font-family: var(--font-numbers); font-weight: 500;">${exchangeRateText}</td>
             `;
             txBody.appendChild(tr);
         });

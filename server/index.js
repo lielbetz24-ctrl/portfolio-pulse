@@ -193,6 +193,7 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
           price DECIMAL(15, 4) DEFAULT 0,
           transaction_date TIMESTAMP WITH TIME ZONE NOT NULL,
           created_by_user_id VARCHAR(50) REFERENCES users(id),
+          exchange_rate DECIMAL(15, 8) DEFAULT NULL,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -262,6 +263,9 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
       // Ensure tips table columns for advisor separation are present
       await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS advisor_id VARCHAR(50)`);
       await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS author_name VARCHAR(100)`);
+
+      // Ensure transactions table column for exchange rate is present
+      await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(15, 8) DEFAULT NULL`);
 
       console.log('[Database] Database tables initialized successfully!');
 
@@ -418,8 +422,8 @@ async function migrateJsonToPostgres(pool) {
       console.log(`[Migration] Migrating ${db.transactions.length} transactions...`);
       for (const tx of db.transactions) {
         await client.query(`
-          INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id, exchange_rate)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (id) DO NOTHING
         `, [
           tx.id,
@@ -429,7 +433,8 @@ async function migrateJsonToPostgres(pool) {
           parseFloat(tx.quantity || 0),
           parseFloat(tx.price || 0),
           tx.transaction_date || new Date().toISOString(),
-          tx.created_by_user_id || null
+          tx.created_by_user_id || null,
+          tx.exchange_rate ? parseFloat(tx.exchange_rate) : null
         ]);
       }
     }
@@ -1327,16 +1332,28 @@ function getAuth(req) {
 const PRICE_CACHE = {};
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 
-async function fetchYahooChart(ticker) {
+async function fetchYahooChart(ticker, bypassCache = false) {
   const normTicker = ticker.toUpperCase();
   const cached = PRICE_CACHE[normTicker];
-  if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
+  
+  if (!bypassCache && cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
     return cached.data;
   }
 
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+  // Cache buster if bypassCache is true
+  const cacheBuster = bypassCache ? `&nocache=${Date.now()}` : '';
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d${cacheBuster}`;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 seconds timeout
+
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PortfolioPulse/1.0)' } });
+    const response = await fetch(url, { 
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PortfolioPulse/1.0)' },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
     if (!response.ok) throw new Error(`Yahoo HTTP ${response.status}`);
     const chartData = await response.json();
     if (!chartData?.chart?.result?.length) return null;
@@ -1376,11 +1393,49 @@ async function fetchYahooChart(ticker) {
 
     return result;
   } catch (e) {
-    // If live fetch fails but we have a stale cache, return it rather than throwing an error!
+    clearTimeout(timeoutId);
+    console.log(`Fetch failed or timed out for ${ticker}:`, e.message);
+    
+    // Fallback 1: Stale in-memory cache
     if (cached) {
-      console.log(`Fetch failed for ${ticker}, returning stale cached price:`, e.message);
+      console.log(`Returning stale cached price for ${ticker}`);
       return cached.data;
     }
+    
+    // Fallback 2: PostgreSQL database query (if PG is active)
+    if (isPgActive) {
+      try {
+        const dbRes = await pool.query('SELECT * FROM stocks WHERE ticker = $1', [normTicker]);
+        if (dbRes.rows.length > 0) {
+          const row = dbRes.rows[0];
+          console.log(`[DB Fallback] Returning saved stock price from DB for ${ticker}`);
+          return {
+            ticker: row.ticker,
+            price: parseFloat(row.price),
+            change: parseFloat(row.change),
+            currency: row.currency,
+            name: row.name,
+            previousClose: parseFloat(row.previous_close)
+          };
+        }
+      } catch (dbErr) {
+        console.error(`[DB Fallback Error] Failed to retrieve stock from DB:`, dbErr.message);
+      }
+    }
+    
+    // Fallback 3: For ILS=X, return default 3.75 if completely failed
+    if (normTicker === 'ILS=X') {
+      console.log(`[Default Fallback] Returning default rate 3.75 for ILS=X`);
+      return {
+        ticker: 'ILS=X',
+        price: 3.75,
+        change: 0,
+        currency: 'ILS',
+        name: 'USD/ILS',
+        previousClose: 3.75
+      };
+    }
+    
     throw e;
   }
 }
@@ -2022,6 +2077,21 @@ async function handleApi(req, res, pathname, query) {
         
         await client.query('UPDATE portfolios SET cash_balance = $1 WHERE id = $2', [cash, portfolio.id]);
         
+        let exchangeRate = body.exchange_rate;
+        if (exchangeRate === undefined || exchangeRate === null) {
+          try {
+            const fx = await fetchYahooChart('ILS=X', true);
+            if (fx?.price) {
+              exchangeRate = fx.price;
+            } else {
+              exchangeRate = 3.75;
+            }
+          } catch (e) {
+            console.log('[Transactions API] Failed to fetch fallback exchange rate:', e.message);
+            exchangeRate = 3.75;
+          }
+        }
+
         const tx = {
           id: uid('tx'),
           portfolio_id: body.portfolio_id,
@@ -2030,13 +2100,14 @@ async function handleApi(req, res, pathname, query) {
           quantity: qty,
           price: price,
           transaction_date: body.transaction_date || new Date().toISOString(),
-          created_by_user_id: user.id
+          created_by_user_id: user.id,
+          exchange_rate: exchangeRate
         };
         
         await client.query(`
-          INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [tx.id, tx.portfolio_id, tx.ticker, tx.action_type, tx.quantity, tx.price, tx.transaction_date, tx.created_by_user_id]);
+          INSERT INTO transactions (id, portfolio_id, ticker, action_type, quantity, price, transaction_date, created_by_user_id, exchange_rate)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [tx.id, tx.portfolio_id, tx.ticker, tx.action_type, tx.quantity, tx.price, tx.transaction_date, tx.created_by_user_id, tx.exchange_rate]);
         
         await syncPortfolioPositions(tx.portfolio_id, client);
         
@@ -2076,6 +2147,21 @@ async function handleApi(req, res, pathname, query) {
         portfolio.cash_balance = (portfolio.cash_balance || 0) + totalGain;
       }
       
+      let exchangeRate = body.exchange_rate;
+      if (exchangeRate === undefined || exchangeRate === null) {
+        try {
+          const fx = await fetchYahooChart('ILS=X', true);
+          if (fx?.price) {
+            exchangeRate = fx.price;
+          } else {
+            exchangeRate = 3.75;
+          }
+        } catch (e) {
+          console.log('[Transactions API] Failed to fetch fallback exchange rate:', e.message);
+          exchangeRate = 3.75;
+        }
+      }
+
       const tx = {
         id: uid('tx'),
         portfolio_id: body.portfolio_id,
@@ -2084,7 +2170,8 @@ async function handleApi(req, res, pathname, query) {
         quantity: qty,
         price: price,
         transaction_date: body.transaction_date || new Date().toISOString(),
-        created_by_user_id: user.id
+        created_by_user_id: user.id,
+        exchange_rate: exchangeRate
       };
       
       db.transactions.push(tx);
