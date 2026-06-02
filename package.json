@@ -4,7 +4,8 @@
   "description": "מעקב וניתוח תיקי השקעות ומסחר מונחה בינה מלאכותית",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "dev": "node --env-file=.env.development server/index.js"
   },
   "dependencies": {
     "express-rate-limit": "^7.1.5",
