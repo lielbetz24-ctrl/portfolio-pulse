@@ -1789,7 +1789,7 @@ async function handleApi(req, res, pathname, query) {
         }
         
         if (tips.length > 0) {
-          console.log(`[Tips DB Sync Debug] Raw database timestamps for first tip:`, {
+          console.log(`⭐⭐⭐ [Tips DB Sync Debug - PG] Raw database timestamps for first tip:`, {
             id: tips[0].id,
             raw_date: tips[0].date,
             raw_date_type: typeof tips[0].date,
@@ -1828,6 +1828,15 @@ async function handleApi(req, res, pathname, query) {
     } else {
       const db = readDb();
       await generateDailyAITips(db);
+      if (db.tips && db.tips.length > 0) {
+        console.log(`⭐⭐⭐ [Tips DB Sync Debug - JSON] Raw database timestamps for first tip:`, {
+          id: db.tips[0].id,
+          raw_created_at: db.tips[0].created_at,
+          raw_date: db.tips[0].date,
+          raw_date_type: typeof db.tips[0].date,
+          raw_date_string: String(db.tips[0].date)
+        });
+      }
       const tips = db.tips.map(t => ({
         id: t.id,
         advisor_id: t.advisor_id,
@@ -2229,7 +2238,7 @@ async function handleApi(req, res, pathname, query) {
         }
         
         if (tips.length > 0) {
-          console.log(`[Tips DB API Debug] Raw database timestamps for first tip:`, {
+          console.log(`⭐⭐⭐ [Tips DB API Debug - PG] Raw database timestamps for first tip:`, {
             id: tips[0].id,
             raw_date: tips[0].date,
             raw_date_type: typeof tips[0].date,
@@ -2257,6 +2266,15 @@ async function handleApi(req, res, pathname, query) {
       }
     } else {
       const db = readDb();
+      if (db.tips && db.tips.length > 0) {
+        console.log(`⭐⭐⭐ [Tips DB API Debug - JSON] Raw database timestamps for first tip:`, {
+          id: db.tips[0].id,
+          raw_created_at: db.tips[0].created_at,
+          raw_date: db.tips[0].date,
+          raw_date_type: typeof db.tips[0].date,
+          raw_date_string: String(db.tips[0].date)
+        });
+      }
       const tips = db.tips.map(t => ({ 
         id: t.id, 
         advisor_id: t.advisor_id, 

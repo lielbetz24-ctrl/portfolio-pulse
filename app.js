@@ -128,11 +128,20 @@ function formatTipTimestamp(dateOrString) {
             return dateOrString;
         }
         const pad = (num) => String(num).padStart(2, '0');
-        const hh = pad(d.getHours());
-        const mm = pad(d.getMinutes());
         const dd = pad(d.getDate());
         const MM = pad(d.getMonth() + 1);
         const yyyy = d.getFullYear();
+
+        // Check if the input is a date-only string (e.g. YYYY-MM-DD) or parses exactly to midnight UTC
+        const isDateOnly = (typeof dateOrString === 'string') && /^\d{4}-\d{2}-\d{2}$/.test(dateOrString.trim());
+        const isMidnightUTC = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+
+        if (isDateOnly || isMidnightUTC) {
+            return `${dd}/${MM}/${yyyy}`;
+        }
+
+        const hh = pad(d.getHours());
+        const mm = pad(d.getMinutes());
         return `${hh}:${mm}, ${dd}/${MM}/${yyyy}`;
     } catch (e) {
         return dateOrString;
