@@ -1788,6 +1788,15 @@ async function handleApi(req, res, pathname, query) {
           tips = tipsRes.rows;
         }
         
+        if (tips.length > 0) {
+          console.log(`[Tips DB Sync Debug] Raw database timestamps for first tip:`, {
+            id: tips[0].id,
+            raw_date: tips[0].date,
+            raw_date_type: typeof tips[0].date,
+            raw_date_string: String(tips[0].date)
+          });
+        }
+
         const tipsMapped = tips.map(t => ({
           id: t.id,
           ticker: t.ticker,
@@ -1798,6 +1807,7 @@ async function handleApi(req, res, pathname, query) {
           target_user_id: t.target_user_id,
           is_read: t.is_read || false,
           image_url: t.image_url,
+          created_at: t.date ? new Date(t.date).toISOString() : null,
           date: t.date ? new Date(t.date).toISOString().split('T')[0] : null
         }));
         
@@ -2218,6 +2228,15 @@ async function handleApi(req, res, pathname, query) {
           tips = tipsRes.rows;
         }
         
+        if (tips.length > 0) {
+          console.log(`[Tips DB API Debug] Raw database timestamps for first tip:`, {
+            id: tips[0].id,
+            raw_date: tips[0].date,
+            raw_date_type: typeof tips[0].date,
+            raw_date_string: String(tips[0].date)
+          });
+        }
+
         const tipsMapped = tips.map(t => ({
           id: t.id,
           ticker: t.ticker,
