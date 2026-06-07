@@ -260,6 +260,10 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
         );
       `);
 
+      // Ensure portfolios table columns for dynamic balances are present
+      await pool.query(`ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS total_stock_value DECIMAL(15, 4) DEFAULT 0`);
+      await pool.query(`ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS total_equity DECIMAL(15, 4) DEFAULT 0`);
+
       // Ensure tips table columns for advisor separation are present
       await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS advisor_id VARCHAR(50)`);
       await pool.query(`ALTER TABLE tips ADD COLUMN IF NOT EXISTS author_name VARCHAR(100)`);
@@ -1167,8 +1171,24 @@ async function syncPortfolioPositions(portfolioId, client) {
   const transactions = txRes.rows;
   const holdingsMap = {};
   
+  let dynamic_cash_balance = 0;
+  
   for (const tx of transactions) {
-    if (tx.action_type === 'deposit' || tx.action_type === 'withdraw') continue;
+    const qty = Number(tx.quantity || 0);
+    const price = Number(tx.price || 0);
+
+    if (tx.action_type === 'deposit') {
+      dynamic_cash_balance += price;
+      continue;
+    } else if (tx.action_type === 'withdraw') {
+      dynamic_cash_balance -= price;
+      continue;
+    } else if (tx.action_type === 'buy') {
+      dynamic_cash_balance -= (qty * price);
+    } else if (tx.action_type === 'sell') {
+      dynamic_cash_balance += (qty * price);
+    }
+
     const ticker = (tx.ticker || '').toUpperCase();
     if (!ticker) continue;
     
@@ -1249,6 +1269,20 @@ async function syncPortfolioPositions(portfolioId, client) {
       pnl_pct
     ]);
   }
+  
+  // Recalculate totals and update portfolios table
+  const posRes = await client.query('SELECT market_value FROM positions WHERE portfolio_id = $1', [portfolioId]);
+  let total_stock_value = 0;
+  for (const row of posRes.rows) {
+    total_stock_value += Number(row.market_value || 0);
+  }
+  const total_equity = dynamic_cash_balance + total_stock_value;
+
+  await client.query(`
+    UPDATE portfolios 
+    SET cash_balance = $1, total_stock_value = $2, total_equity = $3 
+    WHERE id = $4
+  `, [dynamic_cash_balance, total_stock_value, total_equity, portfolioId]);
 }
 
 async function updateAllStockPricesJob() {
@@ -1898,7 +1932,7 @@ async function handleApi(req, res, pathname, query) {
           portfolio = portRes.rows[0];
         }
 
-        await syncPortfolioPositions(portfolio.id, client);
+        // Removed heavy recalculation here; relying on cron job and transaction hook to maintain accuracy
 
         const posRes = await client.query(`
           SELECT p.*, s.name as stock_name, s.change as daily_change
@@ -2080,21 +2114,15 @@ async function handleApi(req, res, pathname, query) {
             client.release();
             return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע עסקה זו' });
           }
-          cash -= cost;
         } else if (actionType === 'withdraw') {
           if (cash < price) {
             await client.query('ROLLBACK');
             client.release();
             return sendJson(res, 400, { error: 'אין מספיק יתרה: אין לך מספיק יתרת מזומן פנויה לביצוע משיכה זו' });
           }
-          cash -= price;
-        } else if (actionType === 'deposit') {
-          cash += price;
-        } else if (actionType === 'sell') {
-          cash += qty * price;
         }
         
-        await client.query('UPDATE portfolios SET cash_balance = $1 WHERE id = $2', [cash, portfolio.id]);
+        // Removed manual cash_balance update to favor dynamic calculation in syncPortfolioPositions
         
         let exchangeRate = body.exchange_rate;
         if (exchangeRate === undefined || exchangeRate === null) {
