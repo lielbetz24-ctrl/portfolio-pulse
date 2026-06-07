@@ -1202,8 +1202,6 @@ async function syncPortfolioPositions(portfolioId, client) {
     }
     
     const h = holdingsMap[ticker];
-    const qty = Number(tx.quantity || 0);
-    const price = Number(tx.price || 0);
     
     if (tx.action_type === 'buy' || tx.action_type === 'holding') {
       h.quantity += qty;
