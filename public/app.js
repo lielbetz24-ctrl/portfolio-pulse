@@ -1272,7 +1272,7 @@ function buildHoldingDetailsRow(holding, idx, prefix) {
 
     tr.innerHTML = `
         <td colspan="5" style="padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); background: rgba(0, 0, 0, 0.2);">
-            <div class="holding-details-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; text-align: right;">
+            <div class="holding-details-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; text-align: right; align-items: center;">
                 <div class="detail-item">
                     <span style="font-size: 0.72rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">כמות מניות בתיק</span>
                     <strong style="font-family: var(--font-numbers); font-size: 0.9rem; color: var(--text-primary);">${quantityCell}</strong>
@@ -1288,6 +1288,10 @@ function buildHoldingDetailsRow(holding, idx, prefix) {
                 <div class="detail-item">
                     <span style="font-size: 0.72rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">סטטוס פוזיציה</span>
                     <div>${positionStatusHtml}</div>
+                </div>
+                <div class="detail-item" style="display: flex; gap: 12px; align-items: center; justify-content: center;">
+                    <button type="button" title="קנייה מהירה" onclick="event.stopPropagation(); openQuickActionModal('buy', '${holding.ticker}', ${holding.quantity}, ${holding.current_price || 0})" style="background: var(--pos-green); color: #fff; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0, 230, 118, 0.3); transition: transform 0.2s;">ק</button>
+                    <button type="button" title="מכירה מהירה" onclick="event.stopPropagation(); openQuickActionModal('sell', '${holding.ticker}', ${holding.quantity}, ${holding.current_price || 0})" style="background: var(--neg-red); color: #fff; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(255, 61, 113, 0.3); transition: transform 0.2s;">מ</button>
                 </div>
             </div>
         </td>
@@ -4240,5 +4244,123 @@ function closeLightbox() {
         setTimeout(() => {
             modal.style.display = 'none';
         }, 300);
+    }
+}
+
+
+// ==================== Quick Actions ====================
+function openQuickActionModal(actionType, ticker, currentQty, currentPrice) {
+    const modal = document.getElementById('quick-action-modal');
+    if (!modal) return;
+    
+    document.getElementById('quick-action-type').value = actionType;
+    document.getElementById('quick-action-ticker').value = ticker;
+    
+    const title = actionType === 'buy' ? `קניית ${ticker}` : `מכירת ${ticker}`;
+    document.getElementById('quick-action-title').textContent = title;
+    
+    document.getElementById('quick-action-qty').value = '';
+    document.getElementById('quick-action-price').value = '';
+    document.getElementById('quick-action-total').textContent = '$0.00';
+    
+    const maxQtyHint = document.getElementById('quick-action-max-qty-hint');
+    if (actionType === 'sell') {
+        maxQtyHint.style.display = 'block';
+        maxQtyHint.textContent = `מקסימום למכירה: ${parseFloat(currentQty).toFixed(4)}`;
+        document.getElementById('quick-action-qty').max = currentQty;
+        document.getElementById('quick-action-qty').setAttribute('data-current-qty', currentQty);
+    } else {
+        maxQtyHint.style.display = 'none';
+        document.getElementById('quick-action-qty').removeAttribute('max');
+        document.getElementById('quick-action-qty').removeAttribute('data-current-qty');
+    }
+    
+    modal.classList.add('active');
+}
+
+function closeQuickActionModal() {
+    const modal = document.getElementById('quick-action-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+function calculateQuickActionTotal() {
+    const qty = parseFloat(document.getElementById('quick-action-qty').value) || 0;
+    const price = parseFloat(document.getElementById('quick-action-price').value) || 0;
+    const total = qty * price;
+    document.getElementById('quick-action-total').textContent = formatCurrency(total);
+}
+
+async function handleQuickActionSubmit(event) {
+    event.preventDefault();
+    
+    const actionType = document.getElementById('quick-action-type').value;
+    const ticker = document.getElementById('quick-action-ticker').value;
+    const qty = parseFloat(document.getElementById('quick-action-qty').value);
+    const price = parseFloat(document.getElementById('quick-action-price').value);
+    
+    if (isNaN(qty) || qty <= 0 || isNaN(price) || price <= 0) {
+        showToast('נא להזין כמות ומחיר חוקיים.', 'error');
+        return;
+    }
+    
+    const activePortfolio = (currentUser && currentUser.role === 'admin' && activeViewingClientId) 
+        ? portfolios.find(p => p.user_id === activeViewingClientId) 
+        : portfolios[0];
+
+    if (!activePortfolio) {
+        showToast('תיק השקעות לא נמצא.', 'error');
+        return;
+    }
+
+    if (actionType === 'sell') {
+        const currentQty = parseFloat(document.getElementById('quick-action-qty').getAttribute('data-current-qty')) || 0;
+        if (qty > currentQty) {
+            showToast('לא ניתן למכור כמות העולה על ההחזקה הנוכחית בתיק.', 'error');
+            return;
+        }
+    } else if (actionType === 'buy') {
+        const totalCost = qty * price;
+        const metrics = calculatePortfolioMetrics(activePortfolio.id);
+        if (metrics && metrics.cash_balance < totalCost) {
+            showToast(`אין מספיק יתרה: דרוש ${formatCurrency(totalCost)} אך זמין ${formatCurrency(metrics.cash_balance)}`, 'error');
+            return;
+        }
+    }
+    
+    const submitBtn = document.getElementById('quick-action-submit-btn');
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'מבצע...';
+    submitBtn.disabled = true;
+    
+    try {
+        const res = await API.createTransaction({
+            portfolio_id: activePortfolio.id,
+            ticker: ticker,
+            action_type: actionType,
+            quantity: qty,
+            price: price,
+            transaction_date: new Date().toISOString(),
+            exchange_rate: typeof usdToIlsRate !== 'undefined' ? usdToIlsRate : 3.7
+        });
+        
+        await loadUserData();
+        closeQuickActionModal();
+        
+        if (currentUser.role === 'admin' && activeViewingClientId) {
+            viewClientPortfolio(activeViewingClientId);
+        } else if (activeView === 'dashboard') {
+            renderCharts();
+            refreshCalculations();
+        }
+        
+        showToast(`פעולת ${actionType === 'buy' ? 'קנייה' : 'מכירה'} של ${ticker} בוצעה בהצלחה!`, 'success');
+    } catch (e) {
+        console.error('Error submitting quick action:', e);
+        showToast(e.message || 'אירעה שגיאה בביצוע הפעולה.', 'error');
+    } finally {
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
     }
 }

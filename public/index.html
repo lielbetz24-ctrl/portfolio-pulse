@@ -915,6 +915,54 @@
         <img id="lightbox-img" style="max-width: 90%; max-height: 90%; border-radius: 8px; transform: scale(0.95); transition: transform 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.5);" alt="תצוגת המלצה">
     </div>
 
+    <!-- מודל פעולה מהירה (Quick Action Modal) -->
+    <div id="quick-action-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="quick-action-title">קניית מניה</h3>
+                <button class="modal-close-btn" onclick="closeQuickActionModal()">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            
+            <form id="quick-action-form" onsubmit="handleQuickActionSubmit(event)">
+                <input type="hidden" id="quick-action-type" value="buy">
+                <input type="hidden" id="quick-action-ticker" value="">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="quick-action-qty">כמות מניות</label>
+                        <div class="input-wrapper">
+                            <span class="material-icons-round input-icon">toll</span>
+                            <input type="number" id="quick-action-qty" step="0.0001" min="0.0001" placeholder="0.00" oninput="calculateQuickActionTotal()" required>
+                        </div>
+                        <span class="field-hint" id="quick-action-max-qty-hint" style="display: none; color: var(--warning-gold);">מקסימום למכירה: 0.00</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="quick-action-price">מחיר ביצוע בפועל ($)</label>
+                        <div class="input-wrapper">
+                            <span class="material-icons-round input-icon">attach_money</span>
+                            <input type="number" id="quick-action-price" step="0.01" min="0.01" placeholder="הזן מחיר" oninput="calculateQuickActionTotal()" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="transaction-summary-card">
+                    <div class="summary-row">
+                        <span>סך הכל שווי פעולה:</span>
+                        <span id="quick-action-total" class="summary-total">$0.00</span>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeQuickActionModal()">ביטול</button>
+                    <button type="submit" class="btn btn-success" id="quick-action-submit-btn">אישור פעולה</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- הודעות התראה קופצות (Toasts) -->
     <div id="toast-container" class="toast-container"></div>
 
