@@ -4378,6 +4378,7 @@ async function handleQuickActionSubmit(event) {
 }
 
 
+
 // ==================== Performance Graph ====================
 
 let performanceChartInstance = null;
@@ -4385,17 +4386,17 @@ let performanceChartInstance = null;
 async function fetchPerformanceData(range = '1M') {
     // Update pills UI
     document.querySelectorAll('.pill-btn').forEach(btn => btn.classList.remove('active'));
-    const activePill = document.getElementById(pill-);
+    const activePill = document.getElementById(`pill-${range}`);
     if (activePill) activePill.classList.add('active');
 
     if (!currentUser) return;
     
     // Admin viewing client uses activeViewingClientId
-    const userId = (currentUser.role === 'admin' && activeViewingClientId) ? activeViewingClientId : currentUser.id;
+    const userId = (currentUser.role === 'admin' && typeof activeViewingClientId !== 'undefined' && activeViewingClientId) ? activeViewingClientId : currentUser.id;
 
     try {
-        const response = await fetch(/api/portfolio/history/?range=, {
-            headers: { 'Authorization': Bearer  }
+        const response = await fetch(`/api/portfolio/history/${userId}?range=${range}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
         });
         
         if (!response.ok) throw new Error('Failed to fetch performance data');
@@ -4416,7 +4417,7 @@ function renderPerformanceChart(data) {
     }
 
     if (!data || data.length === 0) {
-        document.getElementById('performance-total-value').textContent = '.00';
+        document.getElementById('performance-total-value').textContent = '$0.00';
         document.getElementById('performance-return').textContent = 'אין נתונים מספיקים לתקופה זו';
         document.getElementById('performance-return').style.color = 'var(--text-secondary)';
         return;
@@ -4424,7 +4425,7 @@ function renderPerformanceChart(data) {
 
     const labels = data.map(d => {
         const date = new Date(d.snapshot_date);
-        return ${date.getDate()}/;
+        return `${date.getDate()}/${date.getMonth() + 1}`;
     });
     
     const values = data.map(d => parseFloat(d.total_value));
@@ -4439,7 +4440,7 @@ function renderPerformanceChart(data) {
     
     const returnEl = document.getElementById('performance-return');
     const sign = change >= 0 ? '+' : '';
-    returnEl.textContent = ${sign} (%);
+    returnEl.textContent = `${sign}${formatCurrency(change)} (${sign}${changePct.toFixed(2)}%)`;
     returnEl.style.color = change >= 0 ? 'var(--pos-green)' : 'var(--neg-red)';
 
     // Gradient
