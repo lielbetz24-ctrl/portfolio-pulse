@@ -2864,8 +2864,41 @@ async function handleApi(req, res, pathname, query) {
     }
   }
 
+  
+  const matchHistory = pathname.match(/^\/api\/portfolio\/history\/([a-zA-Z0-9-]+)$/);
+  if (matchHistory && req.method === 'GET') {
+    const targetUserId = matchHistory[1];
+    if (!user) return sendJson(res, 401, { error: 'Unauthorized' });
+    if (user.role !== 'admin' && user.id !== targetUserId) {
+      return sendJson(res, 403, { error: 'Forbidden' });
+    }
+
+    const range = query.get('range') || '1M';
+    let dateFilter = new Date();
+    if (range === '1W') dateFilter.setDate(dateFilter.getDate() - 7);
+    else if (range === '1M') dateFilter.setDate(dateFilter.getDate() - 30);
+    else if (range === '1Y') dateFilter.setDate(dateFilter.getDate() - 365);
+    else if (range === 'YTD') dateFilter = new Date(dateFilter.getFullYear(), 0, 1);
+    else dateFilter.setDate(dateFilter.getDate() - 30); // default 1M
+    
+    const nyDateFilter = new Date(dateFilter.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const dateStr = `${nyDateFilter.getFullYear()}-${String(nyDateFilter.getMonth() + 1).padStart(2, '0')}-${String(nyDateFilter.getDate()).padStart(2, '0')}`;
+
+    try {
+      const { rows } = await pool.query(
+        'SELECT snapshot_date, total_value FROM portfolio_snapshots WHERE user_id = $1 AND snapshot_date >= $2 ORDER BY snapshot_date ASC',
+        [targetUserId, dateStr]
+      );
+      return sendJson(res, 200, rows);
+    } catch (err) {
+      console.error('[History API Error]', err);
+      return sendJson(res, 500, { error: 'Internal server error' });
+    }
+  }
+
   return sendJson(res, 404, { error: 'Not found' });
-}const server = http.createServer(async (req, res) => {
+}
+const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     let pathname = decodeURIComponent(url.pathname);
