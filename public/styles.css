@@ -2047,3 +2047,22 @@ input[type="number"], .metric-value, .pnl-percent, .holdings-table td:nth-child(
     touch-action: none;
 }
 
+
+/* Performance Pills */
+.pill-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pill-btn.active {
+  background: rgba(41, 98, 255, 0.15);
+  border-color: var(--accent-blue-start);
+  color: var(--accent-blue-start);
+}

@@ -723,6 +723,10 @@ function renderSidebarNavigation() {
                     <span class="material-icons-round">space_dashboard</span>
                     <span>לוח בקרה (Dashboard)</span>
                 </button>
+                <button class="nav-item" onclick="switchView('performance')" id="nav-performance">
+                    <span class="material-icons-round">show_chart</span>
+                    <span>ביצועים</span>
+                </button>
                 <button class="nav-item" onclick="switchView('transactions')" id="nav-transactions">
                     <span class="material-icons-round">history</span>
                     <span>היסטוריית עסקאות</span>
@@ -753,6 +757,10 @@ function renderSidebarNavigation() {
                 <button class="mobile-nav-item active" onclick="switchView('dashboard')" id="mobile-nav-dashboard">
                     <span class="material-icons-round">space_dashboard</span>
                     <span>לוח בקרה (Dashboard)</span>
+                </button>
+                <button class="mobile-nav-item" onclick="switchView('performance')" id="mobile-nav-performance">
+                    <span class="material-icons-round">show_chart</span>
+                    <span>ביצועים</span>
                 </button>
                 <button class="mobile-nav-item" onclick="switchView('transactions')" id="mobile-nav-transactions">
                     <span class="material-icons-round">history</span>
@@ -951,6 +959,10 @@ function switchView(view) {
         titleEl.textContent = 'לוח בקרה פיננסי';
         subtitleEl.textContent = 'מעקב ביצועים, רווחים והתפלגות תיק ההשקעות שלך';
         setTimeout(renderCharts, 50);
+    } else if (view === 'performance') {
+        titleEl.textContent = 'ביצועים';
+        subtitleEl.textContent = 'גרף התפתחות שווי התיק לאורך זמן';
+        fetchPerformanceData('1M'); // Default range
     } else if (view === 'transactions') {
         titleEl.textContent = 'היסטוריית פעולות ועסקאות';
         subtitleEl.textContent = 'רישום מלא של כל פעולות המניות והמזומן שבוצעו בתיק';
@@ -4363,4 +4375,129 @@ async function handleQuickActionSubmit(event) {
         submitBtn.textContent = originalText;
         submitBtn.disabled = false;
     }
+}
+
+
+// ==================== Performance Graph ====================
+
+let performanceChartInstance = null;
+
+async function fetchPerformanceData(range = '1M') {
+    // Update pills UI
+    document.querySelectorAll('.pill-btn').forEach(btn => btn.classList.remove('active'));
+    const activePill = document.getElementById(pill-);
+    if (activePill) activePill.classList.add('active');
+
+    if (!currentUser) return;
+    
+    // Admin viewing client uses activeViewingClientId
+    const userId = (currentUser.role === 'admin' && activeViewingClientId) ? activeViewingClientId : currentUser.id;
+
+    try {
+        const response = await fetch(/api/portfolio/history/?range=, {
+            headers: { 'Authorization': Bearer  }
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch performance data');
+        
+        const data = await response.json();
+        renderPerformanceChart(data);
+    } catch (err) {
+        console.error('[Performance] Error fetching data:', err);
+    }
+}
+
+function renderPerformanceChart(data) {
+    const ctx = document.getElementById('performanceChart').getContext('2d');
+    
+    // Destroy previous instance
+    if (performanceChartInstance) {
+        performanceChartInstance.destroy();
+    }
+
+    if (!data || data.length === 0) {
+        document.getElementById('performance-total-value').textContent = '.00';
+        document.getElementById('performance-return').textContent = 'אין נתונים מספיקים לתקופה זו';
+        document.getElementById('performance-return').style.color = 'var(--text-secondary)';
+        return;
+    }
+
+    const labels = data.map(d => {
+        const date = new Date(d.snapshot_date);
+        return ${date.getDate()}/;
+    });
+    
+    const values = data.map(d => parseFloat(d.total_value));
+    
+    // Update header
+    const latestValue = values[values.length - 1];
+    const firstValue = values[0];
+    const change = latestValue - firstValue;
+    const changePct = firstValue !== 0 ? (change / firstValue) * 100 : 0;
+    
+    document.getElementById('performance-total-value').textContent = formatCurrency(latestValue);
+    
+    const returnEl = document.getElementById('performance-return');
+    const sign = change >= 0 ? '+' : '';
+    returnEl.textContent = ${sign} (%);
+    returnEl.style.color = change >= 0 ? 'var(--pos-green)' : 'var(--neg-red)';
+
+    // Gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, 250);
+    gradient.addColorStop(0, 'rgba(41, 98, 255, 0.4)');
+    gradient.addColorStop(1, 'rgba(41, 98, 255, 0.0)');
+
+    performanceChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'שווי התיק',
+                data: values,
+                borderColor: '#2962ff',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                tension: 0.4, // Smooth line
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 6,
+                pointHitRadius: 20
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(20, 24, 34, 0.9)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            return formatCurrency(context.parsed.y);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: false // Hide grid and axis
+                },
+                y: {
+                    display: false, // Hide grid and axis
+                    min: Math.min(...values) * 0.98 // Add some padding below
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+    });
 }

@@ -199,6 +199,29 @@
 
                 <!-- ==================== א. מסכי לקוח קצה (Client Views) ==================== -->
 
+                <!-- גרף ביצועים לקוח (Performance) -->
+                <div id="view-performance-pane" class="tab-pane" style="display: none;">
+                    <div class="visual-card" style="padding: 24px 16px;">
+                        <div class="performance-header" style="text-align: center; margin-bottom: 24px;">
+                            <div id="performance-total-value" style="font-size: 2.5rem; font-weight: 700; color: var(--text-primary); font-family: var(--font-numbers);">$0.00</div>
+                            <div id="performance-return" style="font-size: 1rem; font-weight: 500; font-family: var(--font-numbers); margin-top: 4px;">
+                                $0.00 (0.00%)
+                            </div>
+                        </div>
+                        
+                        <div class="chart-wrapper" style="height: 250px; position: relative; width: 100%;">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
+
+                        <div class="performance-pills" style="display: flex; justify-content: center; gap: 12px; margin-top: 24px;">
+                            <button class="pill-btn" onclick="fetchPerformanceData('1W')" id="pill-1W">1W</button>
+                            <button class="pill-btn active" onclick="fetchPerformanceData('1M')" id="pill-1M">1M</button>
+                            <button class="pill-btn" onclick="fetchPerformanceData('YTD')" id="pill-YTD">YTD</button>
+                            <button class="pill-btn" onclick="fetchPerformanceData('1Y')" id="pill-1Y">1Y</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 1. לוח בקרה לקוח (Dashboard) -->
                 <div id="view-dashboard-pane" class="tab-pane">
                     <div class="metrics-grid">
