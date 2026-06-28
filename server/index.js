@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
+const cron = require('node-cron');
 
 const { calculateHoldingMetrics, calculatePortfolioTotals } = require('./utils/finance');
 
@@ -257,6 +258,17 @@ async function initDbWithRetry(retries = 5, delayMs = 5000) {
           pnl DECIMAL(15, 4) DEFAULT NULL,
           pnl_pct DECIMAL(15, 4) DEFAULT NULL,
           PRIMARY KEY (portfolio_id, ticker)
+        );
+
+        CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+          id SERIAL PRIMARY KEY,
+          user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+          snapshot_date DATE NOT NULL,
+          total_value DECIMAL(15, 4) DEFAULT 0,
+          cash_value DECIMAL(15, 4) DEFAULT 0,
+          holdings_value DECIMAL(15, 4) DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, snapshot_date)
         );
       `);
 
@@ -2983,6 +2995,210 @@ function startDailyAITipsCron() {
   }, 30000); // check every 30 seconds
 }
 
+async function captureDailySnapshots() {
+  console.log('[Snapshots] Starting daily portfolio snapshots capture...');
+  try {
+    const nyDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const year = nyDate.getFullYear();
+    const month = String(nyDate.getMonth() + 1).padStart(2, '0');
+    const day = String(nyDate.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+
+    const { rows: portfolios } = await pool.query('SELECT user_id, cash_balance, total_stock_value, total_equity FROM portfolios');
+    
+    let captured = 0;
+    for (const p of portfolios) {
+      await pool.query(`
+        INSERT INTO portfolio_snapshots (user_id, snapshot_date, total_value, cash_value, holdings_value)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id, snapshot_date) DO UPDATE
+        SET total_value = EXCLUDED.total_value,
+            cash_value = EXCLUDED.cash_value,
+            holdings_value = EXCLUDED.holdings_value
+      `, [p.user_id, todayStr, p.total_equity || 0, p.cash_balance || 0, p.total_stock_value || 0]);
+      captured++;
+    }
+    console.log(`[Snapshots] Captured daily snapshots for ${captured} portfolios on ${todayStr}.`);
+  } catch (err) {
+    console.error('[Snapshots Error] Failed to capture daily snapshots:', err.message);
+  }
+}
+
+function startDailySnapshotsCron() {
+  cron.schedule('30 23 * * *', async () => {
+    await captureDailySnapshots();
+  }, {
+    scheduled: true,
+    timezone: "America/New_York"
+  });
+  console.log('[Cron] Scheduled daily portfolio snapshots at 23:30 America/New_York');
+}
+
+// Helper for delaying loop
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
+async function fetchHistoricalPricesYahoo(ticker, days = 90) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=${days}d`;
+  try {
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PortfolioPulse/1.0)' } });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.chart || !data.chart.result || !data.chart.result.length) return null;
+    
+    const result = data.chart.result[0];
+    const timestamps = result.timestamp;
+    const closes = result.indicators.quote[0].close;
+    
+    const pricesByDate = {};
+    for (let i = 0; i < timestamps.length; i++) {
+      if (closes[i] !== null) {
+        // Convert timestamp to NY date string YYYY-MM-DD
+        const d = new Date(timestamps[i] * 1000);
+        const nyDate = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const dateStr = `${nyDate.getFullYear()}-${String(nyDate.getMonth() + 1).padStart(2, '0')}-${String(nyDate.getDate()).padStart(2, '0')}`;
+        pricesByDate[dateStr] = closes[i];
+      }
+    }
+    return pricesByDate;
+  } catch (e) {
+    console.error(`Failed to fetch historical prices for ${ticker}:`, e.message);
+    return null;
+  }
+}
+
+async function handleBackfillSnapshots(req, res) {
+  try {
+    console.log('[Backfill] Starting historical snapshots backfill...');
+    
+    // Get all transactions
+    const { rows: transactions } = await pool.query('SELECT * FROM transactions ORDER BY transaction_date ASC');
+    
+    // Get all users
+    const { rows: users } = await pool.query('SELECT id FROM users');
+    
+    // Extract unique tickers from transactions (excluding deposit/withdraw)
+    const uniqueTickers = [...new Set(transactions.filter(t => t.ticker && t.action_type !== 'deposit' && t.action_type !== 'withdraw').map(t => t.ticker.toUpperCase()))];
+    
+    console.log(`[Backfill] Found ${uniqueTickers.length} unique tickers. Fetching 90d history...`);
+    const historyCache = {}; // { AAPL: { '2023-10-01': 150.0, ... } }
+    
+    for (const ticker of uniqueTickers) {
+      const history = await fetchHistoricalPricesYahoo(ticker, 90);
+      if (history) {
+        historyCache[ticker] = history;
+      }
+      // Delay as requested by user
+      await delay(800); 
+    }
+    console.log('[Backfill] Fetched historical prices.');
+
+    // Generate last 90 days array in NY timezone
+    const datesToSimulate = [];
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const nyDate = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const dateStr = `${nyDate.getFullYear()}-${String(nyDate.getMonth() + 1).padStart(2, '0')}-${String(nyDate.getDate()).padStart(2, '0')}`;
+      datesToSimulate.push(dateStr);
+    }
+    
+    let recordsUpserted = 0;
+    
+    // Simulate each user
+    for (const user of users) {
+      const userId = user.id;
+      const userTx = transactions.filter(t => t.portfolio_id && t.portfolio_id.startsWith(userId) || t.created_by_user_id === userId); 
+      // Actually transactions have portfolio_id which is equal to user_id in this app
+      const txs = transactions.filter(t => t.portfolio_id === userId);
+      
+      let currentCash = 0;
+      let currentHoldings = {}; // { AAPL: qty }
+      
+      let txIdx = 0;
+      
+      for (const dateStr of datesToSimulate) {
+        // Process transactions up to the end of this date
+        while (txIdx < txs.length) {
+          const tx = txs[txIdx];
+          const txDate = new Date(tx.transaction_date);
+          const nyTxDate = new Date(txDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const txDateStr = `${nyTxDate.getFullYear()}-${String(nyTxDate.getMonth() + 1).padStart(2, '0')}-${String(nyTxDate.getDate()).padStart(2, '0')}`;
+          
+          if (txDateStr > dateStr) {
+            break; // transaction is from a future date relative to our simulation loop
+          }
+          
+          const qty = Number(tx.quantity);
+          const price = Number(tx.price);
+          const ticker = tx.ticker ? tx.ticker.toUpperCase() : null;
+          
+          if (tx.action_type === 'deposit') {
+            currentCash += price; // price column is used for amount
+          } else if (tx.action_type === 'withdraw') {
+            currentCash -= price;
+          } else if (tx.action_type === 'buy') {
+            currentCash -= (qty * price);
+            currentHoldings[ticker] = (currentHoldings[ticker] || 0) + qty;
+          } else if (tx.action_type === 'sell') {
+            currentCash += (qty * price);
+            currentHoldings[ticker] = (currentHoldings[ticker] || 0) - qty;
+          }
+          txIdx++;
+        }
+        
+        // Calculate holdings value on this date
+        let holdingsValue = 0;
+        for (const [ticker, qty] of Object.entries(currentHoldings)) {
+          if (qty > 0) {
+            // Find price on this date, or closest previous date
+            const tickerHistory = historyCache[ticker];
+            let priceOnDate = 0;
+            if (tickerHistory) {
+              if (tickerHistory[dateStr]) {
+                priceOnDate = tickerHistory[dateStr];
+              } else {
+                // Find closest previous date
+                const sortedDates = Object.keys(tickerHistory).sort().reverse();
+                for (const d of sortedDates) {
+                  if (d < dateStr) {
+                    priceOnDate = tickerHistory[d];
+                    break;
+                  }
+                }
+              }
+            }
+            // If still 0, it means no history found (or it's before history started), we could fallback to the last tx price, but it's hard. We just use 0 or skip.
+            holdingsValue += qty * priceOnDate;
+          }
+        }
+        
+        const totalValue = currentCash + holdingsValue;
+        
+        // Skip inserting if nothing happened yet (totalValue == 0 and cash == 0)
+        if (totalValue > 0 || currentCash > 0 || holdingsValue > 0) {
+          await pool.query(`
+            INSERT INTO portfolio_snapshots (user_id, snapshot_date, total_value, cash_value, holdings_value)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, snapshot_date) DO UPDATE
+            SET total_value = EXCLUDED.total_value,
+                cash_value = EXCLUDED.cash_value,
+                holdings_value = EXCLUDED.holdings_value
+          `, [userId, dateStr, totalValue, currentCash, holdingsValue]);
+          recordsUpserted++;
+        }
+      }
+    }
+    
+    console.log(`[Backfill] Completed! Upserted ${recordsUpserted} snapshots.`);
+    res.json({ success: true, message: `Backfill completed successfully. Upserted ${recordsUpserted} snapshots.` });
+    
+  } catch (err) {
+    console.error('[Backfill Error]', err);
+    res.status(500).json({ error: 'Internal Server Error during backfill' });
+  }
+}
+
+
 function startStockPricesCron() {
   setInterval(async () => {
     try {
@@ -3123,6 +3339,7 @@ server.on('upgrade', (req, socket, head) => {
 
 startDailyAITipsCron();
 startStockPricesCron();
+  startDailySnapshotsCron();
 server.listen(PORT, () => {
   console.log(`\n  PortfolioPulse AI running at http://localhost:${PORT}\n`);
   console.log(`  Admin: aviariel91@gmail.com / AVIm76543\n`);
