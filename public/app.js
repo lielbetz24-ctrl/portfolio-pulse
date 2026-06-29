@@ -4435,17 +4435,29 @@ function renderPerformanceChart(payload) {
     
     const values = data.map(d => parseFloat(d.total_value));
     
-    // Update header (Strictly based on investments, excluding cash)
+    // Update header (Time-Based Yield)
     const latestValue = values[values.length - 1] || 0;
+    const firstValue = values[0] || 0;
     
-    const change = latestValue - totalCost;
-    const changePct = totalCost !== 0 ? (change / totalCost) * 100 : 0;
+    const change = latestValue - firstValue;
+    const changePct = firstValue !== 0 ? (change / firstValue) * 100 : 0;
     
-    document.getElementById('performance-total-value').textContent = formatCurrency(latestValue);
+    const formatStrict = (val) => {
+        const num = parseFloat(val);
+        if (isNaN(num)) return '—';
+        const sign = num < 0 ? '-' : '';
+        const absNum = Math.abs(num);
+        const prefix = typeof displayCurrency !== 'undefined' && displayCurrency === 'ILS' ? '₪' : '$';
+        const converted = typeof displayCurrency !== 'undefined' && displayCurrency === 'ILS' && typeof usdToIlsRate !== 'undefined' ? absNum * usdToIlsRate : absNum;
+        return sign + prefix + converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+    
+    document.getElementById('performance-total-value').textContent = formatStrict(latestValue);
     
     const returnEl = document.getElementById('performance-return');
     const sign = change >= 0 ? '+' : '';
-    returnEl.textContent = `${sign}${formatCurrency(change)} (${sign}${changePct.toFixed(2)}%)`;
+    const formattedChange = formatStrict(Math.abs(change));
+    returnEl.textContent = `${sign}${formattedChange} (${sign}${changePct.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`;
     returnEl.style.color = change >= 0 ? 'var(--pos-green)' : 'var(--neg-red)';
 
     // Gradient
