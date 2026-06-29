@@ -4395,13 +4395,7 @@ async function fetchPerformanceData(range = '1M') {
     const userId = (currentUser.role === 'admin' && typeof activeViewingClientId !== 'undefined' && activeViewingClientId) ? activeViewingClientId : currentUser.id;
 
     try {
-        const response = await fetch(`/api/portfolio/history/${userId}?range=${range}`, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-        
-        if (!response.ok) throw new Error('Failed to fetch performance data');
-        
-        const data = await response.json();
+        const data = await API.request('GET', `/api/portfolio/history/${userId}?range=${range}`);
         renderPerformanceChart(data);
     } catch (err) {
         console.error('[Performance] Error fetching data:', err);
