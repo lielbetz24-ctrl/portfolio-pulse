@@ -2874,22 +2874,81 @@ async function handleApi(req, res, pathname, query) {
     }
 
     const range = query.get('range') || '1M';
-    let dateFilter = new Date();
-    if (range === '1W') dateFilter.setDate(dateFilter.getDate() - 7);
-    else if (range === '1M') dateFilter.setDate(dateFilter.getDate() - 30);
-    else if (range === '1Y') dateFilter.setDate(dateFilter.getDate() - 365);
-    else if (range === 'YTD') dateFilter = new Date(dateFilter.getFullYear(), 0, 1);
-    else dateFilter.setDate(dateFilter.getDate() - 30); // default 1M
-    
-    const nyDateFilter = new Date(dateFilter.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const dateStr = `${nyDateFilter.getFullYear()}-${String(nyDateFilter.getMonth() + 1).padStart(2, '0')}-${String(nyDateFilter.getDate()).padStart(2, '0')}`;
+    let days = 30;
+    if (range === '1W') days = 7;
+    else if (range === '1M') days = 30;
+    else if (range === '1Y') days = 365;
+    else if (range === 'YTD') {
+      const startOfYear = new Date(new Date().getFullYear(), 0, 1);
+      days = Math.max(1, Math.ceil((new Date() - startOfYear) / (1000 * 60 * 60 * 24)));
+    }
 
     try {
-      const { rows } = await pool.query(
-        'SELECT snapshot_date, total_value FROM portfolio_snapshots WHERE user_id = $1 AND snapshot_date >= $2 ORDER BY snapshot_date ASC',
-        [targetUserId, dateStr]
-      );
-      return sendJson(res, 200, rows);
+      // 1. Fetch user's portfolio and positions
+      const portRes = await pool.query('SELECT id FROM portfolios WHERE user_id = $1', [targetUserId]);
+      if (portRes.rows.length === 0) {
+        return sendJson(res, 200, { history: [], totalCost: 0 });
+      }
+      const portfolioId = portRes.rows[0].id;
+      
+      const posRes = await pool.query('SELECT ticker, quantity, avg_buy_price FROM positions WHERE portfolio_id = $1', [portfolioId]);
+      const positions = posRes.rows;
+      
+      if (positions.length === 0) {
+         return sendJson(res, 200, { history: [], totalCost: 0 });
+      }
+
+      // 2. Calculate Total Cost Basis (Exclude cash)
+      const totalCost = positions.reduce((acc, pos) => acc + (parseFloat(pos.quantity) * parseFloat(pos.avg_buy_price)), 0);
+
+      // 3. Fetch historical prices for all tickers in parallel
+      const tickers = positions.map(p => p.ticker);
+      const pricesPromises = tickers.map(t => fetchHistoricalPricesYahoo(t, days));
+      const pricesResults = await Promise.all(pricesPromises);
+      
+      const historicalPrices = {}; // ticker -> { dateStr: price }
+      tickers.forEach((t, i) => {
+        historicalPrices[t] = pricesResults[i] || {};
+      });
+
+      // 4. Generate dates array from (today - days) to today
+      const historyList = [];
+      const today = new Date();
+      // Start from oldest day
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - days);
+      
+      // Keep track of the latest known price for each ticker to fallback on missing days (weekends)
+      const latestKnownPrices = {};
+      
+      for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+         const nyDate = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+         const dateStr = `${nyDate.getFullYear()}-${String(nyDate.getMonth() + 1).padStart(2, '0')}-${String(nyDate.getDate()).padStart(2, '0')}`;
+         
+         let dailyTotalValue = 0;
+         let validDay = false;
+
+         positions.forEach(pos => {
+           let price = historicalPrices[pos.ticker][dateStr];
+           if (price !== undefined) {
+             latestKnownPrices[pos.ticker] = price;
+             validDay = true;
+           } else {
+             price = latestKnownPrices[pos.ticker] || parseFloat(pos.avg_buy_price); // fallback to cost if no price yet
+           }
+           dailyTotalValue += parseFloat(pos.quantity) * price;
+         });
+
+         // Only add to history if at least one ticker traded that day, OR it's the very last element
+         // to avoid flat weekend lines if possible, but actually we WANT the flat line to keep the date axis consistent.
+         // Chart.js handles this well if we just push all days.
+         historyList.push({
+           snapshot_date: dateStr,
+           total_value: dailyTotalValue
+         });
+      }
+
+      return sendJson(res, 200, { history: historyList, totalCost });
     } catch (err) {
       console.error('[History API Error]', err);
       return sendJson(res, 500, { error: 'Internal server error' });

@@ -4409,20 +4409,24 @@ async function fetchPerformanceData(range = '1M') {
     }
 }
 
-function renderPerformanceChart(data) {
+function renderPerformanceChart(payload) {
     const ctx = document.getElementById('performanceChart').getContext('2d');
     
     // Destroy previous instance
     if (performanceChartInstance) {
         performanceChartInstance.destroy();
+        performanceChartInstance = null;
     }
 
-    if (!data || data.length === 0) {
+    if (!payload || !payload.history || payload.history.length === 0) {
         document.getElementById('performance-total-value').textContent = '$0.00';
-        document.getElementById('performance-return').textContent = 'אין נתונים מספיקים לתקופה זו';
+        document.getElementById('performance-return').textContent = 'אין נתונים מספיקים לתקופה זו (אין החזקות פעילות)';
         document.getElementById('performance-return').style.color = 'var(--text-secondary)';
         return;
     }
+
+    const data = payload.history;
+    const totalCost = payload.totalCost || 0;
 
     const labels = data.map(d => {
         const date = new Date(d.snapshot_date);
@@ -4431,11 +4435,11 @@ function renderPerformanceChart(data) {
     
     const values = data.map(d => parseFloat(d.total_value));
     
-    // Update header
-    const latestValue = values[values.length - 1];
-    const firstValue = values[0];
-    const change = latestValue - firstValue;
-    const changePct = firstValue !== 0 ? (change / firstValue) * 100 : 0;
+    // Update header (Strictly based on investments, excluding cash)
+    const latestValue = values[values.length - 1] || 0;
+    
+    const change = latestValue - totalCost;
+    const changePct = totalCost !== 0 ? (change / totalCost) * 100 : 0;
     
     document.getElementById('performance-total-value').textContent = formatCurrency(latestValue);
     
