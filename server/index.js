@@ -2909,9 +2909,7 @@ async function handleApi(req, res, pathname, query) {
       const totalCost = positions.reduce((acc, pos) => acc + (parseFloat(pos.quantity) * parseFloat(pos.avg_buy_price)), 0);
 
       // 3. Fetch historical prices for all tickers in parallel
-      // We fetch more days from Yahoo because Yahoo uses TRADING days, and we use CALENDAR days.
-      // Also for 1D we need at least 2 points (prev close + current).
-      const fetchDays = Math.max(5, Math.ceil(days * 1.5)); 
+      const fetchDays = Math.max(10, Math.ceil(days * 1.5)); 
       
       const tickers = positions.map(p => p.ticker);
       const pricesPromises = tickers.map(t => fetchHistoricalPricesYahoo(t, fetchDays));
@@ -2926,41 +2924,46 @@ async function handleApi(req, res, pathname, query) {
       const historyList = [];
       const today = new Date();
       
-      // Calculate requested start date
       const requestedStartDate = new Date(today);
       if (range === '1D') {
-          // For 1D, we specifically want yesterday and today. 
-          // If yesterday was a weekend, fetchHistoricalPricesYahoo fallback will handle it.
           requestedStartDate.setDate(today.getDate() - 1);
       } else {
           requestedStartDate.setDate(today.getDate() - days);
       }
       
-      // Apply Floor Date (Max of requestedStartDate and userCreatedAt)
-      // But ensure for 1D we at least get 2 points if they signed up today.
       let startDate = new Date(Math.max(requestedStartDate.getTime(), userCreatedAt.getTime()));
       
-      // If start date is today and range is 1D, artificially push it to yesterday to show a line
+      // Determine if we hit the floor date
+      let hitFloorDate = requestedStartDate.getTime() <= userCreatedAt.getTime();
+      if (range === '1D') hitFloorDate = false; // 1D should strictly show daily P&L, not total P&L
+      
       if (range === '1D' && startDate.getDate() === today.getDate() && startDate.getMonth() === today.getMonth()) {
           startDate.setDate(startDate.getDate() - 1);
       }
-      
-      const latestKnownPrices = {};
       
       for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
          const nyDate = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
          const dateStr = `${nyDate.getFullYear()}-${String(nyDate.getMonth() + 1).padStart(2, '0')}-${String(nyDate.getDate()).padStart(2, '0')}`;
          
          let dailyTotalValue = 0;
-         let validDay = false;
 
          positions.forEach(pos => {
-           let price = historicalPrices[pos.ticker][dateStr];
-           if (price !== undefined) {
-             latestKnownPrices[pos.ticker] = price;
-             validDay = true;
-           } else {
-             price = latestKnownPrices[pos.ticker] || parseFloat(pos.avg_buy_price); // fallback
+           let price;
+           // Lookback up to 7 days to find the most recent closing price before or on 'd'
+           for (let offset = 0; offset <= 7; offset++) {
+             const checkDate = new Date(d);
+             checkDate.setDate(checkDate.getDate() - offset);
+             const checkNyDate = new Date(checkDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+             const checkDateStr = `${checkNyDate.getFullYear()}-${String(checkNyDate.getMonth() + 1).padStart(2, '0')}-${String(checkNyDate.getDate()).padStart(2, '0')}`;
+             
+             if (historicalPrices[pos.ticker] && historicalPrices[pos.ticker][checkDateStr] !== undefined) {
+               price = historicalPrices[pos.ticker][checkDateStr];
+               break;
+             }
+           }
+           
+           if (price === undefined) {
+             price = parseFloat(pos.avg_buy_price); // Ultimate fallback
            }
            dailyTotalValue += parseFloat(pos.quantity) * price;
          });
@@ -2969,6 +2972,11 @@ async function handleApi(req, res, pathname, query) {
            snapshot_date: dateStr,
            total_value: dailyTotalValue
          });
+      }
+      
+      // BUGFIX #2: Anchor the first point to Total Cost Basis if we hit the floor date (except for 1D).
+      if (hitFloorDate && historyList.length > 0) {
+          historyList[0].total_value = totalCost;
       }
       
       // If it's 1D and we somehow only got 1 element, duplicate it to avoid crash
