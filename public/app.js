@@ -4405,6 +4405,13 @@ async function fetchPerformanceData(range = '1M') {
         renderPerformanceChart(data);
     } catch (err) {
         console.error('[Performance] Error fetching data:', err);
+        document.getElementById('performance-total-value').textContent = 'שגיאה';
+        document.getElementById('performance-return').textContent = 'לא ניתן לטעון נתונים (בדוק חיבור או שרת)';
+        document.getElementById('performance-return').style.color = 'var(--neg-red)';
+        if (performanceChartInstance) {
+            performanceChartInstance.destroy();
+            performanceChartInstance = null;
+        }
     }
 }
 

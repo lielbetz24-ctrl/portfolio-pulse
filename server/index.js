@@ -2865,7 +2865,7 @@ async function handleApi(req, res, pathname, query) {
   }
 
   
-  const matchHistory = pathname.match(/^\/api\/portfolio\/history\/([a-zA-Z0-9-]+)$/);
+  const matchHistory = pathname.match(/^\/api\/portfolio\/history\/([^\/]+)$/);
   if (matchHistory && req.method === 'GET') {
     const targetUserId = matchHistory[1];
     if (!user) return sendJson(res, 401, { error: 'Unauthorized' });
