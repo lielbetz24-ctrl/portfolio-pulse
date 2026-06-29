@@ -2875,15 +2875,22 @@ async function handleApi(req, res, pathname, query) {
 
     const range = query.get('range') || '1M';
     let days = 30;
-    if (range === '1W') days = 7;
+    if (range === '1D') days = 1;
+    else if (range === '1W') days = 7;
     else if (range === '1M') days = 30;
-    else if (range === '1Y') days = 365;
+    else if (range === '3M') days = 90;
+    else if (range === '6M') days = 180;
     else if (range === 'YTD') {
       const startOfYear = new Date(new Date().getFullYear(), 0, 1);
       days = Math.max(1, Math.ceil((new Date() - startOfYear) / (1000 * 60 * 60 * 24)));
     }
 
     try {
+      // Fetch user's created_at to serve as the historic "floor" date
+      const userRes = await pool.query('SELECT created_at FROM users WHERE id = $1', [targetUserId]);
+      if (userRes.rows.length === 0) return sendJson(res, 404, { error: 'User not found' });
+      const userCreatedAt = new Date(userRes.rows[0].created_at);
+
       // 1. Fetch user's portfolio and positions
       const portRes = await pool.query('SELECT id FROM portfolios WHERE user_id = $1', [targetUserId]);
       if (portRes.rows.length === 0) {
@@ -2902,8 +2909,12 @@ async function handleApi(req, res, pathname, query) {
       const totalCost = positions.reduce((acc, pos) => acc + (parseFloat(pos.quantity) * parseFloat(pos.avg_buy_price)), 0);
 
       // 3. Fetch historical prices for all tickers in parallel
+      // We fetch more days from Yahoo because Yahoo uses TRADING days, and we use CALENDAR days.
+      // Also for 1D we need at least 2 points (prev close + current).
+      const fetchDays = Math.max(5, Math.ceil(days * 1.5)); 
+      
       const tickers = positions.map(p => p.ticker);
-      const pricesPromises = tickers.map(t => fetchHistoricalPricesYahoo(t, days));
+      const pricesPromises = tickers.map(t => fetchHistoricalPricesYahoo(t, fetchDays));
       const pricesResults = await Promise.all(pricesPromises);
       
       const historicalPrices = {}; // ticker -> { dateStr: price }
@@ -2911,14 +2922,29 @@ async function handleApi(req, res, pathname, query) {
         historicalPrices[t] = pricesResults[i] || {};
       });
 
-      // 4. Generate dates array from (today - days) to today
+      // 4. Generate dates array
       const historyList = [];
       const today = new Date();
-      // Start from oldest day
-      const startDate = new Date(today);
-      startDate.setDate(startDate.getDate() - days);
       
-      // Keep track of the latest known price for each ticker to fallback on missing days (weekends)
+      // Calculate requested start date
+      const requestedStartDate = new Date(today);
+      if (range === '1D') {
+          // For 1D, we specifically want yesterday and today. 
+          // If yesterday was a weekend, fetchHistoricalPricesYahoo fallback will handle it.
+          requestedStartDate.setDate(today.getDate() - 1);
+      } else {
+          requestedStartDate.setDate(today.getDate() - days);
+      }
+      
+      // Apply Floor Date (Max of requestedStartDate and userCreatedAt)
+      // But ensure for 1D we at least get 2 points if they signed up today.
+      let startDate = new Date(Math.max(requestedStartDate.getTime(), userCreatedAt.getTime()));
+      
+      // If start date is today and range is 1D, artificially push it to yesterday to show a line
+      if (range === '1D' && startDate.getDate() === today.getDate() && startDate.getMonth() === today.getMonth()) {
+          startDate.setDate(startDate.getDate() - 1);
+      }
+      
       const latestKnownPrices = {};
       
       for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
@@ -2934,18 +2960,23 @@ async function handleApi(req, res, pathname, query) {
              latestKnownPrices[pos.ticker] = price;
              validDay = true;
            } else {
-             price = latestKnownPrices[pos.ticker] || parseFloat(pos.avg_buy_price); // fallback to cost if no price yet
+             price = latestKnownPrices[pos.ticker] || parseFloat(pos.avg_buy_price); // fallback
            }
            dailyTotalValue += parseFloat(pos.quantity) * price;
          });
 
-         // Only add to history if at least one ticker traded that day, OR it's the very last element
-         // to avoid flat weekend lines if possible, but actually we WANT the flat line to keep the date axis consistent.
-         // Chart.js handles this well if we just push all days.
          historyList.push({
            snapshot_date: dateStr,
            total_value: dailyTotalValue
          });
+      }
+      
+      // If it's 1D and we somehow only got 1 element, duplicate it to avoid crash
+      if (range === '1D' && historyList.length === 1) {
+          historyList.unshift({
+             snapshot_date: historyList[0].snapshot_date + ' (Prev)',
+             total_value: historyList[0].total_value
+          });
       }
 
       return sendJson(res, 200, { history: historyList, totalCost });
@@ -2954,7 +2985,6 @@ async function handleApi(req, res, pathname, query) {
       return sendJson(res, 500, { error: 'Internal server error' });
     }
   }
-
   return sendJson(res, 404, { error: 'Not found' });
 }
 const server = http.createServer(async (req, res) => {
